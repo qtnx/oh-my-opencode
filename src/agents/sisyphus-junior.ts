@@ -1,12 +1,12 @@
-import type { AgentConfig } from "@opencode-ai/sdk"
-import { isGptModel } from "./types"
-import type { CategoryConfig } from "../config/schema"
+import type { AgentConfig } from "@opencode-ai/sdk";
+import { isGptModel } from "./types";
+import type { CategoryConfig } from "../config/schema";
 import {
   createAgentToolRestrictions,
   migrateAgentConfig,
-} from "../shared/permission-compat"
+} from "../shared/permission-compat";
 
-const SISYPHUS_JUNIOR_PROMPT = `<Role>
+const SISYPHUS_JUNIOR_PROMPT_BASE = `<Role>
 Sisyphus-Junior - Focused executor from OhMyOpenCode.
 Execute tasks directly. NEVER delegate or spawn other agents.
 </Role>
@@ -14,12 +14,17 @@ Execute tasks directly. NEVER delegate or spawn other agents.
 <Critical_Constraints>
 BLOCKED ACTIONS (will fail if attempted):
 - task tool: BLOCKED
-- sisyphus_task tool: BLOCKED  
-- sisyphus_task tool: BLOCKED (already blocked above, but explicit)
-- call_omo_agent tool: BLOCKED
+- sisyphus_task tool: BLOCKED`;
+
+const SISYPHUS_JUNIOR_PROMPT_CALL_OMO_BLOCKED = `
+- call_omo_agent tool: BLOCKED`;
+
+const SISYPHUS_JUNIOR_PROMPT_TAIL = `
 
 You work ALONE. No delegation. No background tasks. Execute directly.
-</Critical_Constraints>
+</Critical_Constraints>`;
+
+const SISYPHUS_JUNIOR_PROMPT_REST = `
 
 <Work_Context>
 ## Notepad Location (for recording learnings)
@@ -67,28 +72,65 @@ Task NOT complete without:
 - Start immediately. No acknowledgments.
 - Match user's communication style.
 - Dense > verbose.
-</Style>`
+</Style>`;
 
-function buildSisyphusJuniorPrompt(promptAppend?: string): string {
-  if (!promptAppend) return SISYPHUS_JUNIOR_PROMPT
-  return SISYPHUS_JUNIOR_PROMPT + "\n\n" + promptAppend
+function buildSisyphusJuniorPrompt(
+  allowCallOmoAgent: boolean,
+  promptAppend?: string,
+): string {
+  const base = allowCallOmoAgent
+    ? SISYPHUS_JUNIOR_PROMPT_BASE + SISYPHUS_JUNIOR_PROMPT_TAIL
+    : SISYPHUS_JUNIOR_PROMPT_BASE +
+      SISYPHUS_JUNIOR_PROMPT_CALL_OMO_BLOCKED +
+      SISYPHUS_JUNIOR_PROMPT_TAIL;
+
+  const fullPrompt = base + SISYPHUS_JUNIOR_PROMPT_REST;
+  if (!promptAppend) return fullPrompt;
+  return fullPrompt + "\n\n" + promptAppend;
 }
 
 // Core tools that Sisyphus-Junior must NEVER have access to
-const BLOCKED_TOOLS = ["task", "sisyphus_task", "call_omo_agent"]
+const BLOCKED_TOOLS = ["task", "sisyphus_task", "call_omo_agent"];
+
+// Prompt append for GPT models to suggest using omo agents for faster exploration
+const GPT_OWO_AGENT_HINT = `
+<OmoAgentHint>
+You have access to call_omo_agent tool. Use it to spawn specialized agents for faster work:
+- explore: Blazing fast codebase exploration (contextual grep). Fire multiple in parallel for broad searches.
+- librarian: Multi-repo analysis, official docs lookup, GitHub examples. Use for unfamiliar libraries.
+
+Example:
+call_omo_agent(subagent_type="explore", prompt="Find all auth implementations", run_in_background=true)
+call_omo_agent(subagent_type="librarian", prompt="How does NextAuth handle JWT refresh?", run_in_background=true)
+
+Fire them in background (run_in_background=true) and continue your work. Collect results with background_output when needed.
+</OmoAgentHint>`;
 
 export function createSisyphusJuniorAgent(
   categoryConfig: CategoryConfig,
-  promptAppend?: string
+  promptAppend?: string,
 ): AgentConfig {
-  const prompt = buildSisyphusJuniorPrompt(promptAppend)
-  const model = categoryConfig.model
+  const model = categoryConfig.model;
 
-  const baseRestrictions = createAgentToolRestrictions(BLOCKED_TOOLS)
+  // For GPT models: allow call_omo_agent and append usage hint
+  const isGpt = isGptModel(model);
+  const blockedTools = isGpt
+    ? BLOCKED_TOOLS.filter((t) => t !== "call_omo_agent")
+    : [...BLOCKED_TOOLS];
+
+  // Build prompt: GPT models get call_omo_agent unblocked + usage hint
+  const effectivePromptAppend = isGpt
+    ? promptAppend
+      ? `${promptAppend}\n${GPT_OWO_AGENT_HINT}`
+      : GPT_OWO_AGENT_HINT
+    : promptAppend;
+  const prompt = buildSisyphusJuniorPrompt(isGpt, effectivePromptAppend);
+
+  const baseRestrictions = createAgentToolRestrictions(blockedTools);
   const mergedConfig = migrateAgentConfig({
     ...baseRestrictions,
     ...(categoryConfig.tools ? { tools: categoryConfig.tools } : {}),
-  })
+  });
 
   const base: AgentConfig = {
     description:
@@ -99,17 +141,17 @@ export function createSisyphusJuniorAgent(
     prompt,
     color: "#20B2AA",
     ...mergedConfig,
-  }
+  };
 
   if (categoryConfig.temperature !== undefined) {
-    base.temperature = categoryConfig.temperature
+    base.temperature = categoryConfig.temperature;
   }
   if (categoryConfig.top_p !== undefined) {
-    base.top_p = categoryConfig.top_p
+    base.top_p = categoryConfig.top_p;
   }
 
   if (categoryConfig.thinking) {
-    return { ...base, thinking: categoryConfig.thinking } as AgentConfig
+    return { ...base, thinking: categoryConfig.thinking } as AgentConfig;
   }
 
   if (categoryConfig.reasoningEffort) {
@@ -117,15 +159,15 @@ export function createSisyphusJuniorAgent(
       ...base,
       reasoningEffort: categoryConfig.reasoningEffort,
       textVerbosity: categoryConfig.textVerbosity,
-    } as AgentConfig
+    } as AgentConfig;
   }
 
   if (isGptModel(model)) {
-    return { ...base, reasoningEffort: "medium" } as AgentConfig
+    return { ...base, reasoningEffort: "medium" } as AgentConfig;
   }
 
   return {
     ...base,
     thinking: { type: "enabled", budgetTokens: 32000 },
-  } as AgentConfig
+  } as AgentConfig;
 }
