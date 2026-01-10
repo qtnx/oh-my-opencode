@@ -1,5 +1,8 @@
-import { createBuiltinAgents } from "../agents";
+import { createBuiltinAgents, mergeAgentConfig } from "../agents/utils";
 import { createSisyphusJuniorAgent } from "../agents/sisyphus-junior";
+import { createOrchestratorSisyphusAgent } from "../agents/orchestrator-sisyphus";
+import type { AvailableAgent } from "../agents/sisyphus-prompt-builder";
+import type { BuiltinAgentName } from "../agents/types";
 import {
   loadUserCommands,
   loadProjectCommands,
@@ -17,6 +20,9 @@ import {
   loadUserAgents,
   loadProjectAgents,
 } from "../features/claude-code-agent-loader";
+import {
+  loadAllOpencodeAgents,
+} from "../features/opencode-agent-loader";
 import { loadMcpConfigs } from "../features/claude-code-mcp-loader";
 import { loadAllPluginComponents } from "../features/claude-code-plugin-loader";
 import { createBuiltinMcps } from "../mcp";
@@ -90,7 +96,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       log(`Plugin load errors`, { errors: pluginComponents.errors });
     }
 
-    const builtinAgents = createBuiltinAgents(
+    const { agents: builtinAgents, availableAgents: builtinAvailableAgents } = createBuiltinAgents(
       pluginConfig.disabled_agents,
       pluginConfig.agents,
       ctx.directory,
@@ -106,6 +112,24 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
     const projectAgents = (pluginConfig.claude_code?.agents ?? true)
       ? loadProjectAgents()
       : {};
+
+    // OpenCode agents: load from .opencode/agent/ and ~/.config/opencode/agent/
+    // Only agents with omo_agent metadata are loaded
+    const opencodeAgents = loadAllOpencodeAgents();
+    const opencodeAgentConfigs = Object.fromEntries(
+      opencodeAgents.map((a) => [a.name, a.config])
+    );
+    const opencodeAvailableAgents: AvailableAgent[] = opencodeAgents.map((a) => ({
+      name: a.name as BuiltinAgentName,
+      description: a.config.description ?? "",
+      metadata: a.metadata,
+    }));
+
+    if (opencodeAgents.length > 0) {
+      log(`Loaded ${opencodeAgents.length} OpenCode agents`, {
+        agents: opencodeAgents.map((a) => a.name),
+      });
+    }
 
     // Plugin agents: Apply permission migration for compatibility
     const rawPluginAgents = pluginComponents.agents;
@@ -219,6 +243,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
         ),
         ...userAgents,
         ...projectAgents,
+        ...opencodeAgentConfigs,
         ...pluginAgents,
         ...filteredConfigAgents,
         build: { ...migratedBuild, mode: "subagent", hidden: true },
@@ -229,9 +254,34 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
         ...builtinAgents,
         ...userAgents,
         ...projectAgents,
+        ...opencodeAgentConfigs,
         ...pluginAgents,
         ...configAgent,
       };
+    }
+
+    // Create orchestrator-sisyphus with ALL available agents (builtin + opencode)
+    const allAvailableAgents: AvailableAgent[] = [
+      ...builtinAvailableAgents,
+      ...opencodeAvailableAgents,
+    ];
+
+    const orchestratorOverride = pluginConfig.agents?.["orchestrator-sisyphus"];
+    const orchestratorConfig = createOrchestratorSisyphusAgent({
+      model: orchestratorOverride?.model,
+      availableAgents: allAvailableAgents,
+    });
+
+    if (orchestratorOverride) {
+      const mergedOrchestrator = mergeAgentConfig(
+        orchestratorConfig,
+        orchestratorOverride
+      );
+      (config.agent as Record<string, unknown>)["orchestrator-sisyphus"] =
+        mergedOrchestrator;
+    } else {
+      (config.agent as Record<string, unknown>)["orchestrator-sisyphus"] =
+        orchestratorConfig;
     }
 
     const agentResult = config.agent as AgentConfig;

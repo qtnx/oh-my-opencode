@@ -7,7 +7,7 @@ describe("createBuiltinAgents with model overrides", () => {
     // #given - no overrides
 
     // #when
-    const agents = createBuiltinAgents()
+    const { agents } = createBuiltinAgents()
 
     // #then
     expect(agents.Sisyphus.model).toBe("anthropic/claude-opus-4-5")
@@ -22,7 +22,7 @@ describe("createBuiltinAgents with model overrides", () => {
     }
 
     // #when
-    const agents = createBuiltinAgents([], overrides)
+    const { agents } = createBuiltinAgents([], overrides)
 
     // #then
     expect(agents.Sisyphus.model).toBe("github-copilot/gpt-5.2")
@@ -35,7 +35,7 @@ describe("createBuiltinAgents with model overrides", () => {
     const systemDefaultModel = "openai/gpt-5.2"
 
     // #when
-    const agents = createBuiltinAgents([], {}, undefined, systemDefaultModel)
+    const { agents } = createBuiltinAgents([], {}, undefined, systemDefaultModel)
 
     // #then
     expect(agents.Sisyphus.model).toBe("openai/gpt-5.2")
@@ -47,7 +47,7 @@ describe("createBuiltinAgents with model overrides", () => {
     // #given - no overrides
 
     // #when
-    const agents = createBuiltinAgents()
+    const { agents } = createBuiltinAgents()
 
     // #then
     expect(agents.oracle.model).toBe("openai/gpt-5.2")
@@ -63,7 +63,7 @@ describe("createBuiltinAgents with model overrides", () => {
     }
 
     // #when
-    const agents = createBuiltinAgents([], overrides)
+    const { agents } = createBuiltinAgents([], overrides)
 
     // #then
     expect(agents.oracle.model).toBe("anthropic/claude-sonnet-4")
@@ -79,7 +79,7 @@ describe("createBuiltinAgents with model overrides", () => {
     }
 
     // #when
-    const agents = createBuiltinAgents([], overrides)
+    const { agents } = createBuiltinAgents([], overrides)
 
     // #then
     expect(agents.Sisyphus.model).toBe("github-copilot/gpt-5.2")
