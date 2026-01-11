@@ -620,12 +620,13 @@ Use \`background_output(task_id="${task.id}")\` to retrieve this result when rea
     }
 
     // Inject notification via session.prompt with noReply
+    // Only include agent field if parentAgent is defined (undefined would cause agent switch)
     try {
       await this.client.session.prompt({
         path: { id: task.parentSessionID },
         body: {
           noReply: !allComplete,  // Silent unless all complete
-          agent: task.parentAgent,
+          ...(task.parentAgent !== undefined ? { agent: task.parentAgent } : {}),
           parts: [{ type: "text", text: notification }],
         },
       })
