@@ -252,6 +252,36 @@ Paste this into a fresh opencode session:
 Install and configure by following the instructions here https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/refs/heads/master/README.md
 ```
 
+### For Developers (Local Install)
+
+For team members who want to install from source with easy updates:
+
+```bash
+# One command for everything (install or update)
+curl -fsSL https://raw.githubusercontent.com/qtx/oh-my-opencode/dev/script/install-local.sh | bash
+```
+
+This will:
+- Clone repo to `~/.local/share/oh-my-opencode`
+- Build the plugin
+- Link to `~/.config/opencode/plugin/oh-my-opencode.js`
+- Sync shared config files (`opencode.json`, `AGENTS.md`) with backup
+- Remove old `oh-my-opencode` entries from `opencode.json`
+
+**Run the same command to update** - it auto-detects and pulls latest changes.
+
+**Other commands:**
+```bash
+# Check status
+curl -fsSL https://raw.githubusercontent.com/qtx/oh-my-opencode/dev/script/install-local.sh | bash -s status
+
+# Rebuild without pulling (for local changes)
+curl -fsSL https://raw.githubusercontent.com/qtx/oh-my-opencode/dev/script/install-local.sh | bash -s rebuild
+
+# Uninstall
+curl -fsSL https://raw.githubusercontent.com/qtx/oh-my-opencode/dev/script/install-local.sh | bash -s uninstall
+```
+
 ### For LLM Agents
 
 <details>
