@@ -1,6 +1,6 @@
 import type { PluginInput } from "@opencode-ai/plugin"
 import { execSync } from "node:child_process"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
   readBoulderState,
@@ -11,7 +11,6 @@ import { getMainSessionID, subagentSessions } from "../../features/claude-code-s
 import { findNearestMessageWithFields, MESSAGE_STORAGE } from "../../features/hook-message-injector"
 import { log } from "../../shared/logger"
 import { createSystemDirective, SYSTEM_DIRECTIVE_PREFIX, SystemDirectiveTypes } from "../../shared/system-directive"
-import { isCallerOrchestrator, getMessageDir } from "../../shared/session-utils"
 import type { BackgroundManager } from "../../features/background-agent"
 
 export const HOOK_NAME = "atlas"
@@ -69,7 +68,7 @@ const VERIFICATION_REMINDER = `**MANDATORY: WHAT YOU MUST DO RIGHT NOW**
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-CRITICAL: Subagents FREQUENTLY LIE about completion.
+⚠️ CRITICAL: Subagents FREQUENTLY LIE about completion.
 Tests FAILING, code has ERRORS, implementation INCOMPLETE - but they say "done".
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -108,7 +107,7 @@ const ORCHESTRATOR_DELEGATION_REQUIRED = `
 
 ---
 
-${createSystemDirective(SystemDirectiveTypes.DELEGATION_REQUIRED)}
+⚠️⚠️⚠️ ${createSystemDirective(SystemDirectiveTypes.DELEGATION_REQUIRED)} ⚠️⚠️⚠️
 
 **STOP. YOU ARE VIOLATING ORCHESTRATOR PROTOCOL.**
 
@@ -118,7 +117,7 @@ You (Atlas) are attempting to directly modify a file outside \`.sisyphus/\`.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**THIS IS FORBIDDEN** (except for VERIFICATION purposes)
+🚫 **THIS IS FORBIDDEN** (except for quick verification fixes)
 
 As an ORCHESTRATOR, you MUST:
 1. **DELEGATE** all implementation work via \`delegate_task\`
@@ -137,11 +136,16 @@ As an ORCHESTRATOR, you MUST:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**IF THIS IS FOR VERIFICATION:**
-Proceed if you are verifying subagent work by making a small fix.
-But for any substantial changes, USE \`delegate_task\`.
+**BYPASS FOR QUICK FIXES:**
+If you need to make a SMALL, quick fix (e.g., fixing a typo, one-line change):
+1. Send a message containing \`<bypass>\` tag first
+2. Explain why direct edit is appropriate
+3. Then proceed with the edit
 
-**CORRECT APPROACH:**
+Example bypass message:
+"<bypass>Quick fix: typo in error message, single line change</bypass>"
+
+**CORRECT APPROACH FOR SUBSTANTIAL CHANGES:**
 \`\`\`
 delegate_task(
   category="...",
@@ -149,7 +153,27 @@ delegate_task(
 )
 \`\`\`
 
-DELEGATE. DON'T IMPLEMENT.
+⚠️⚠️⚠️ DELEGATE OR BYPASS WITH <bypass> TAG. ⚠️⚠️⚠️
+
+---
+`
+
+const ORCHESTRATOR_EDIT_BYPASSED = `
+
+---
+
+[BYPASS ACKNOWLEDGED - DIRECT EDIT ALLOWED]
+
+You have bypassed the delegation requirement for this edit.
+
+**Path:** $FILE_PATH
+
+✅ Proceeding with direct edit. This should only be used for:
+- Typo fixes
+- One-line changes
+- Quick verification corrections
+
+For substantial changes, use \`sisyphus_task\` next time.
 
 ---
 `
@@ -180,13 +204,13 @@ If you were NOT given **exactly ONE atomic task**, you MUST:
 `
 
 function buildVerificationReminder(sessionId: string): string {
-   return `${VERIFICATION_REMINDER}
+  return `${VERIFICATION_REMINDER}
 
 ---
 
 **If ANY verification fails, use this immediately:**
 \`\`\`
-delegate_task(session_id="${sessionId}", prompt="fix: [describe the specific failure]")
+delegate_task(resume="${sessionId}", prompt="fix: [describe the specific failure]")
 \`\`\``
 }
 
@@ -275,6 +299,7 @@ function getGitDiffStats(directory: string): GitFileStat[] {
       cwd: directory,
       encoding: "utf-8",
       timeout: 5000,
+      stdio: ["pipe", "pipe", "ignore"],
     }).trim()
 
     if (!output) return []
@@ -283,6 +308,7 @@ function getGitDiffStats(directory: string): GitFileStat[] {
       cwd: directory,
       encoding: "utf-8",
       timeout: 5000,
+      stdio: ["pipe", "pipe", "ignore"],
     }).trim()
 
     const statusMap = new Map<string, "modified" | "added" | "deleted">()
@@ -377,6 +403,77 @@ interface ToolExecuteAfterOutput {
   title: string
   output: string
   metadata: Record<string, unknown>
+}
+
+function getMessageDir(sessionID: string): string | null {
+  if (!existsSync(MESSAGE_STORAGE)) return null
+
+  const directPath = join(MESSAGE_STORAGE, sessionID)
+  if (existsSync(directPath)) return directPath
+
+  for (const dir of readdirSync(MESSAGE_STORAGE)) {
+    const sessionPath = join(MESSAGE_STORAGE, dir, sessionID)
+    if (existsSync(sessionPath)) return sessionPath
+  }
+
+  return null
+}
+
+function isCallerOrchestrator(sessionID?: string): boolean {
+   if (!sessionID) return false
+   const messageDir = getMessageDir(sessionID)
+   if (!messageDir) return false
+   const nearest = findNearestMessageWithFields(messageDir)
+   return nearest?.agent === "Atlas"
+ }
+
+/**
+ * Check if orchestrator rules should be enforced for this session.
+ * Uses multiple checks:
+ * 1. Direct message storage check (if agent = orchestrator-sisyphus)
+ * 2. Fallback: if session is part of an active boulder (orchestration mode)
+ */
+function shouldEnforceOrchestratorRules(sessionID?: string, directory?: string): boolean {
+  // Direct check from message storage
+  if (isCallerOrchestrator(sessionID)) return true
+
+  // Fallback: check if this session is part of an active boulder
+  if (sessionID && directory) {
+    const boulderState = readBoulderState(directory)
+    if (boulderState?.session_ids.includes(sessionID)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * Check if recent messages contain a <bypass> tag
+ * Looks at the last 5 message files in the session's message directory
+ */
+function hasRecentBypassTag(sessionID?: string): boolean {
+  if (!sessionID) return false
+  const messageDir = getMessageDir(sessionID)
+  if (!messageDir) return false
+
+  try {
+    const files = readdirSync(messageDir)
+      .filter(f => f.endsWith(".json"))
+      .sort((a, b) => b.localeCompare(a)) // newest first
+      .slice(0, 5) // check last 5 messages
+
+    for (const file of files) {
+      const content = readFileSync(join(messageDir, file), "utf-8")
+      if (content.includes("<bypass>") || content.includes("<bypass/>")) {
+        return true
+      }
+    }
+  } catch {
+    return false
+  }
+
+  return false
 }
 
 interface SessionState {
@@ -475,7 +572,7 @@ export function createAtlasHook(
        await ctx.client.session.prompt({
          path: { id: sessionID },
          body: {
-            agent: "atlas",
+            agent: "Atlas",
            ...(model !== undefined ? { model } : {}),
            parts: [{ type: "text", text: prompt }],
          },
@@ -622,11 +719,12 @@ export function createAtlasHook(
       input: { tool: string; sessionID?: string; callID?: string },
       output: { args: Record<string, unknown>; message?: string }
     ): Promise<void> => {
-      if (!isCallerOrchestrator(input.sessionID)) {
+      // Use enhanced check that also falls back to boulder state
+      if (!shouldEnforceOrchestratorRules(input.sessionID, ctx.directory)) {
         return
       }
 
-      // Check Write/Edit tools for orchestrator - inject strong warning
+      // Check Write/Edit tools for orchestrator - inject warning or allow with bypass
       if (WRITE_EDIT_TOOLS.includes(input.tool)) {
         const filePath = (output.args.filePath ?? output.args.path ?? output.args.file) as string | undefined
         if (filePath && !isSisyphusPath(filePath)) {
@@ -634,13 +732,29 @@ export function createAtlasHook(
           if (input.callID) {
             pendingFilePaths.set(input.callID, filePath)
           }
-          const warning = ORCHESTRATOR_DELEGATION_REQUIRED.replace("$FILE_PATH", filePath)
-          output.message = (output.message || "") + warning
-          log(`[${HOOK_NAME}] Injected delegation warning for direct file modification`, {
-            sessionID: input.sessionID,
-            tool: input.tool,
-            filePath,
-          })
+
+          // Check if bypass tag was used in recent messages
+          const hasBypass = hasRecentBypassTag(input.sessionID)
+
+          if (hasBypass) {
+            // Bypass acknowledged - allow with soft reminder
+            const bypassMsg = ORCHESTRATOR_EDIT_BYPASSED.replace("$FILE_PATH", filePath)
+            output.message = (output.message || "") + bypassMsg
+            log(`[${HOOK_NAME}] Edit bypassed with <bypass> tag`, {
+              sessionID: input.sessionID,
+              tool: input.tool,
+              filePath,
+            })
+          } else {
+            // No bypass - inject strong warning
+            const warning = ORCHESTRATOR_DELEGATION_REQUIRED.replace("$FILE_PATH", filePath)
+            output.message = (output.message || "") + warning
+            log(`[${HOOK_NAME}] Injected delegation warning for direct file modification`, {
+              sessionID: input.sessionID,
+              tool: input.tool,
+              filePath,
+            })
+          }
         }
         return
       }
@@ -649,7 +763,7 @@ export function createAtlasHook(
       if (input.tool === "delegate_task") {
         const prompt = output.args.prompt as string | undefined
         if (prompt && !prompt.includes(SYSTEM_DIRECTIVE_PREFIX)) {
-          output.args.prompt = `<system-reminder>${SINGLE_TASK_DIRECTIVE}</system-reminder>\n` + prompt
+          output.args.prompt = prompt + `\n<system-reminder>${SINGLE_TASK_DIRECTIVE}</system-reminder>`
           log(`[${HOOK_NAME}] Injected single-task directive to delegate_task`, {
             sessionID: input.sessionID,
           })
@@ -661,7 +775,8 @@ export function createAtlasHook(
       input: ToolExecuteAfterInput,
       output: ToolExecuteAfterOutput
     ): Promise<void> => {
-      if (!isCallerOrchestrator(input.sessionID)) {
+      // Use enhanced check that also falls back to boulder state
+      if (!shouldEnforceOrchestratorRules(input.sessionID, ctx.directory)) {
         return
       }
 
@@ -688,8 +803,8 @@ export function createAtlasHook(
         return
       }
 
-       const outputStr = output.output && typeof output.output === "string" ? output.output : ""
-       const isBackgroundLaunch = outputStr.includes("Background task launched") || outputStr.includes("Background task continued")
+      const outputStr = output.output && typeof output.output === "string" ? output.output : ""
+      const isBackgroundLaunch = outputStr.includes("Background task launched") || outputStr.includes("Background task resumed")
       
       if (isBackgroundLaunch) {
         return

@@ -23,7 +23,6 @@ import {
   createInteractiveBashSessionHook,
 
   createThinkingBlockValidatorHook,
-  createCategorySkillReminderHook,
   createRalphLoopHook,
   createAutoSlashCommandHook,
   createEditErrorRecoveryHook,
@@ -32,8 +31,6 @@ import {
   createStartWorkHook,
   createAtlasHook,
   createPrometheusMdOnlyHook,
-  createSisyphusJuniorNotepadHook,
-  createQuestionLabelTruncatorHook,
 } from "./hooks";
 import {
   contextCollector,
@@ -75,29 +72,19 @@ import {
 import { BackgroundManager } from "./features/background-agent";
 import { SkillMcpManager } from "./features/skill-mcp-manager";
 import { initTaskToastManager } from "./features/task-toast-manager";
-import { TmuxSessionManager } from "./features/tmux-subagent";
 import { type HookName } from "./config";
-import { log, detectExternalNotificationPlugin, getNotificationConflictWarning, resetMessageCursor, includesCaseInsensitive } from "./shared";
+import { log, detectExternalNotificationPlugin, getNotificationConflictWarning, resetMessageCursor } from "./shared";
 import { loadPluginConfig } from "./plugin-config";
 import { createModelCacheState, getModelLimit } from "./plugin-state";
 import { createConfigHandler } from "./plugin-handlers";
 
 const OhMyOpenCodePlugin: Plugin = async (ctx) => {
-  log("[OhMyOpenCodePlugin] ENTRY - plugin loading", { directory: ctx.directory })
   // Start background tmux check immediately
   startTmuxCheck();
 
   const pluginConfig = loadPluginConfig(ctx.directory, ctx);
   const disabledHooks = new Set(pluginConfig.disabled_hooks ?? []);
   const firstMessageVariantGate = createFirstMessageVariantGate();
-
-  const tmuxConfig = {
-    enabled: pluginConfig.tmux?.enabled ?? false,
-    layout: pluginConfig.tmux?.layout ?? 'main-vertical',
-    main_pane_size: pluginConfig.tmux?.main_pane_size ?? 60,
-    main_pane_min_width: pluginConfig.tmux?.main_pane_min_width ?? 120,
-    agent_pane_min_width: pluginConfig.tmux?.agent_pane_min_width ?? 40,
-  } as const;
   const isHookEnabled = (hookName: HookName) => !disabledHooks.has(hookName);
 
   const modelCacheState = createModelCacheState();
@@ -192,10 +179,6 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     ? createThinkingBlockValidatorHook()
     : null;
 
-  const categorySkillReminder = isHookEnabled("category-skill-reminder")
-    ? createCategorySkillReminderHook(ctx)
-    : null;
-
   const ralphLoop = isHookEnabled("ralph-loop")
     ? createRalphLoopHook(ctx, {
         config: pluginConfig.ralph_loop,
@@ -215,45 +198,17 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     ? createStartWorkHook(ctx)
     : null;
 
+  const atlasHook = isHookEnabled("atlas")
+    ? createAtlasHook(ctx)
+    : null;
+
   const prometheusMdOnly = isHookEnabled("prometheus-md-only")
     ? createPrometheusMdOnlyHook(ctx)
     : null;
 
-  const sisyphusJuniorNotepad = isHookEnabled("sisyphus-junior-notepad")
-    ? createSisyphusJuniorNotepadHook(ctx)
-    : null;
-
-  const questionLabelTruncator = createQuestionLabelTruncatorHook();
-
   const taskResumeInfo = createTaskResumeInfoHook();
 
-  const tmuxSessionManager = new TmuxSessionManager(ctx, tmuxConfig);
-
-  const backgroundManager = new BackgroundManager(ctx, pluginConfig.background_task, {
-    tmuxConfig,
-    onSubagentSessionCreated: async (event) => {
-      log("[index] onSubagentSessionCreated callback received", {
-        sessionID: event.sessionID,
-        parentID: event.parentID,
-        title: event.title,
-      });
-      await tmuxSessionManager.onSessionCreated({
-        type: "session.created",
-        properties: {
-          info: {
-            id: event.sessionID,
-            parentID: event.parentID,
-            title: event.title,
-          },
-        },
-      });
-      log("[index] onSubagentSessionCreated callback completed");
-    },
-  });
-
-  const atlasHook = isHookEnabled("atlas")
-    ? createAtlasHook(ctx, { directory: ctx.directory, backgroundManager })
-    : null;
+  const backgroundManager = new BackgroundManager(ctx);
 
   initTaskToastManager(ctx.client);
 
@@ -274,41 +229,17 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
   const backgroundTools = createBackgroundTools(backgroundManager, ctx.client);
 
   const callOmoAgent = createCallOmoAgent(ctx, backgroundManager);
-  const isMultimodalLookerEnabled = !includesCaseInsensitive(
-    pluginConfig.disabled_agents ?? [],
-    "multimodal-looker"
-  );
-  const lookAt = isMultimodalLookerEnabled ? createLookAt(ctx) : null;
-  const browserProvider = pluginConfig.browser_automation_engine?.provider ?? "playwright";
+  const lookAt = createLookAt(ctx);
   const delegateTask = createDelegateTask({
     manager: backgroundManager,
     client: ctx.client,
     directory: ctx.directory,
     userCategories: pluginConfig.categories,
     gitMasterConfig: pluginConfig.git_master,
-    sisyphusJuniorModel: pluginConfig.agents?.["sisyphus-junior"]?.model,
-    browserProvider,
-    onSyncSessionCreated: async (event) => {
-      log("[index] onSyncSessionCreated callback", {
-        sessionID: event.sessionID,
-        parentID: event.parentID,
-        title: event.title,
-      });
-      await tmuxSessionManager.onSessionCreated({
-        type: "session.created",
-        properties: {
-          info: {
-            id: event.sessionID,
-            parentID: event.parentID,
-            title: event.title,
-          },
-        },
-      });
-    },
   });
   const disabledSkills = new Set(pluginConfig.disabled_skills ?? []);
   const systemMcpNames = getSystemMcpServerNames();
-  const builtinSkills = createBuiltinSkills({ browserProvider }).filter((skill) => {
+  const builtinSkills = createBuiltinSkills().filter((skill) => {
     if (disabledSkills.has(skill.name as never)) return false;
     if (skill.mcpConfig) {
       for (const mcpName of Object.keys(skill.mcpConfig)) {
@@ -357,7 +288,7 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     : null;
 
   const configHandler = createConfigHandler({
-    ctx: { directory: ctx.directory, client: ctx.client },
+    ctx,
     pluginConfig,
     modelCacheState,
   });
@@ -367,7 +298,7 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       ...builtinTools,
       ...backgroundTools,
       call_omo_agent: callOmoAgent,
-      ...(lookAt ? { look_at: lookAt } : {}),
+      look_at: lookAt,
       delegate_task: delegateTask,
       skill: skillTool,
       skill_mcp: skillMcpTool,
@@ -377,7 +308,7 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
 
     "chat.message": async (input, output) => {
       if (input.agent) {
-        setSessionAgent(input.sessionID, input.agent);
+        updateSessionAgent(input.sessionID, input.agent);
       }
 
       const message = (output as { message: { variant?: string } }).message
@@ -478,7 +409,6 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       await thinkMode?.event(input);
       await anthropicContextWindowLimitRecovery?.event(input);
       await agentUsageReminder?.event(input);
-      await categorySkillReminder?.event(input);
       await interactiveBashSession?.event(input);
       await ralphLoop?.event(input);
       await atlasHook?.handler(input);
@@ -486,36 +416,29 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       const { event } = input;
       const props = event.properties as Record<string, unknown> | undefined;
 
-       if (event.type === "session.created") {
-         const sessionInfo = props?.info as
-           | { id?: string; title?: string; parentID?: string }
-           | undefined;
-         log("[event] session.created", { sessionInfo, props });
-         if (!sessionInfo?.parentID) {
-           setMainSession(sessionInfo?.id);
-         }
-         firstMessageVariantGate.markSessionCreated(sessionInfo);
-         await tmuxSessionManager.onSessionCreated(
-           event as { type: string; properties?: { info?: { id?: string; parentID?: string; title?: string } } }
-         );
-       }
+      if (event.type === "session.created") {
+        const sessionInfo = props?.info as
+          | { id?: string; title?: string; parentID?: string }
+          | undefined;
+        if (!sessionInfo?.parentID) {
+          setMainSession(sessionInfo?.id);
+        }
+        firstMessageVariantGate.markSessionCreated(sessionInfo);
+      }
 
-       if (event.type === "session.deleted") {
-         const sessionInfo = props?.info as { id?: string } | undefined;
-         if (sessionInfo?.id === getMainSessionID()) {
-           setMainSession(undefined);
-         }
-         if (sessionInfo?.id) {
-           clearSessionAgent(sessionInfo.id);
-           resetMessageCursor(sessionInfo.id);
-           firstMessageVariantGate.clear(sessionInfo.id);
-           await skillMcpManager.disconnectSession(sessionInfo.id);
-           await lspManager.cleanupTempDirectoryClients();
-           await tmuxSessionManager.onSessionDeleted({
-             sessionID: sessionInfo.id,
-           });
-         }
-       }
+      if (event.type === "session.deleted") {
+        const sessionInfo = props?.info as { id?: string } | undefined;
+        if (sessionInfo?.id === getMainSessionID()) {
+          setMainSession(undefined);
+        }
+        if (sessionInfo?.id) {
+          clearSessionAgent(sessionInfo.id);
+          resetMessageCursor(sessionInfo.id);
+          firstMessageVariantGate.clear(sessionInfo.id);
+          await skillMcpManager.disconnectSession(sessionInfo.id);
+          await lspManager.cleanupTempDirectoryClients();
+        }
+      }
 
       if (event.type === "message.updated") {
         const info = props?.info as Record<string, unknown> | undefined;
@@ -555,7 +478,6 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     },
 
     "tool.execute.before": async (input, output) => {
-      await questionLabelTruncator["tool.execute.before"]?.(input, output);
       await claudeCodeHooks["tool.execute.before"](input, output);
       await nonInteractiveEnv?.["tool.execute.before"](input, output);
       await commentChecker?.["tool.execute.before"](input, output);
@@ -563,15 +485,13 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       await directoryReadmeInjector?.["tool.execute.before"]?.(input, output);
       await rulesInjector?.["tool.execute.before"]?.(input, output);
       await prometheusMdOnly?.["tool.execute.before"]?.(input, output);
-      await sisyphusJuniorNotepad?.["tool.execute.before"]?.(input, output);
-      await atlasHook?.["tool.execute.before"]?.(input, output);
+      await sisyphusOrchestrator?.["tool.execute.before"]?.(input, output);
 
       if (input.tool === "task") {
         const args = output.args as Record<string, unknown>;
         const subagentType = args.subagent_type as string;
-        const isExploreOrLibrarian = includesCaseInsensitive(
-          ["explore", "librarian"],
-          subagentType ?? ""
+        const isExploreOrLibrarian = ["explore", "librarian"].includes(
+          subagentType
         );
 
         args.tools = {
@@ -643,7 +563,6 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       await rulesInjector?.["tool.execute.after"](input, output);
       await emptyTaskResponseDetector?.["tool.execute.after"](input, output);
       await agentUsageReminder?.["tool.execute.after"](input, output);
-      await categorySkillReminder?.["tool.execute.after"](input, output);
       await interactiveBashSession?.["tool.execute.after"](input, output);
 await editErrorRecovery?.["tool.execute.after"](input, output);
         await delegateTaskRetry?.["tool.execute.after"](input, output);

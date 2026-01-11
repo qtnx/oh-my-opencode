@@ -105,7 +105,8 @@ async function executeBackground(
       agent: args.subagent_type,
       parentSessionID: toolContext.sessionID,
       parentMessageID: toolContext.messageID,
-      parentAgent,
+      // Preserve parent agent context so notifications return to correct agent
+      parentAgent: toolContext.agent,
     })
 
     toolContext.metadata?.({
