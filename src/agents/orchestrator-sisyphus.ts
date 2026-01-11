@@ -1069,6 +1069,57 @@ PLAN PATH: .sisyphus/plans/{plan-name}.md (READ ONLY - NEVER MODIFY)
 ### Dependencies from Previous Tasks
 [What was built that this task depends on]
 [Interfaces, types, functions available]
+
+## SCOPE BOUNDARIES (CRITICAL - Define what agent MUST and MUST NOT do)
+
+### This Task Includes:
+- [ ] [Specific deliverable 1]
+- [ ] [Specific deliverable 2]
+- [ ] Unit tests for NEW code only
+
+### This Task EXCLUDES (will be delegated separately):
+- [ ] E2E tests → \`testing-specialist\` or separate task
+- [ ] Integration tests → \`testing-specialist\` or separate task
+- [ ] Documentation updates → \`document-writer\`
+- [ ] Performance optimization → separate task
+- [ ] Refactoring unrelated code → out of scope
+
+### Completion Criteria:
+- Code compiles without errors
+- Unit tests pass
+- lsp_diagnostics clean on modified files
+- Ready for: [next phase - e2e/integration/docs/review]
+
+## COMPLETION REPORT FORMAT (MANDATORY - Agent MUST return this)
+
+\`\`\`
+TASK COMPLETION REPORT
+======================
+Task: [Task ID and description]
+Status: [DONE | PARTIAL | BLOCKED]
+
+FILES MODIFIED:
+- [file1.ts] - [what changed]
+- [file2.ts] - [what changed]
+
+UNIT TESTS:
+- Added: [list new test files/cases]
+- Results: [X passed, Y failed]
+
+VERIFICATION:
+- [ ] lsp_diagnostics: [clean/errors]
+- [ ] Build: [pass/fail]
+- [ ] Unit tests: [pass/fail]
+
+READY FOR NEXT PHASE:
+- [ ] E2E testing (if applicable)
+- [ ] Integration testing (if applicable)
+- [ ] Documentation update
+- [ ] Code review
+
+NOTES/BLOCKERS:
+[Any issues encountered or decisions made]
+\`\`\`
 \`\`\`
 
 **PROMPT LENGTH CHECK**: Your prompt should be 50-200 lines. If it's under 20 lines, it's TOO SHORT.
@@ -1129,6 +1180,25 @@ Task N: [exact task description]
 
 ### Dependencies
 [What previous tasks built that this depends on]
+
+## SCOPE BOUNDARIES
+
+### This Task Includes:
+- [ ] Implement the token refresh logic change
+- [ ] Unit tests for the new buffer timing
+
+### This Task EXCLUDES:
+- [ ] E2E tests → separate task
+- [ ] Integration tests → separate task
+- [ ] Documentation → document-writer
+
+### Completion Criteria:
+- Code compiles, unit tests pass
+- Ready for: integration testing
+
+## COMPLETION REPORT FORMAT
+Return a structured report with: Task status, Files modified,
+Unit tests added/results, Verification checklist, Ready for next phase.
 \`
 )
 \`\`\`
@@ -1309,6 +1379,53 @@ The power of orchestration is CUMULATIVE LEARNING. After each task:
    - Commands: "Use npm run test:unit not npm test"
 3. **Pass forward** to ALL subsequent subagents
 
+### HANDOFF PROTOCOL (Task Completion → Next Delegation)
+
+When a subagent completes a task and returns a COMPLETION REPORT:
+
+1. **Parse the report** - Extract status, files modified, verification results
+2. **Check "Ready for next phase"** section to determine next delegation:
+
+| Ready For | Delegate To | Category/Agent |
+|-----------|-------------|----------------|
+| E2E testing | testing task | \`category="general"\` with e2e scope |
+| Integration testing | testing task | \`category="general"\` with integration scope |
+| Documentation | document-writer | \`agent="document-writer"\` |
+| Code review | oracle | \`agent="oracle"\` (read-only) |
+| Production deploy | git-master | \`agent="git-master"\` for final commit |
+
+3. **Pass context forward** - Include in next delegation:
+   - What was just completed
+   - Files that were modified
+   - Any notes/blockers from previous task
+
+**Example handoff:**
+\`\`\`typescript
+// After implementation task completes with "Ready for: E2E testing"
+sisyphus_task(
+  category="general",
+  prompt=\`
+  ## TASK
+  E2E tests for authentication token refresh feature
+
+  ## SCOPE BOUNDARIES
+  ### This Task Includes:
+  - [ ] E2E tests for token refresh flow
+  - [ ] Test happy path and error cases
+
+  ### This Task EXCLUDES:
+  - [ ] Modifying implementation code (already done)
+  - [ ] Unit tests (already done)
+
+  ## CONTEXT FROM PREVIOUS TASK
+  Implementation completed by previous agent:
+  - Files modified: src/auth/token.ts
+  - Unit tests added: src/auth/token.test.ts (all passing)
+  - Token refresh buffer changed from 60s to 300s
+  \`
+)
+\`\`\`
+
 ### NOTEPAD SYSTEM (CRITICAL FOR KNOWLEDGE TRANSFER)
 
 All learnings, decisions, and insights MUST be recorded in the notepad system for persistence across sessions AND passed to subagents.
@@ -1449,7 +1566,7 @@ function buildDynamicOrchestratorPrompt(ctx?: OrchestratorContext): string {
     .replace("{SKILLS_SECTION}", skillsSection);
 }
 
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4-5";
+const DEFAULT_MODEL = "anthropic/claude-opus-4-5";
 
 export function createOrchestratorSisyphusAgent(
   ctx?: OrchestratorContext,
