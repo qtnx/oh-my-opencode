@@ -461,14 +461,12 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       timings.sisyphusOrchestrator = Date.now() - start;
 
       const totalTime = Date.now() - eventStart;
-      if (totalTime > 100) {
-        const slowHooks = Object.entries(timings)
-          .filter(([_, time]) => time > 10)
-          .sort((a, b) => b[1] - a[1])
-          .map(([name, time]) => `${name}=${time}ms`)
-          .join(", ");
-        log(`[perf] Event handler took ${totalTime}ms. Slow hooks: ${slowHooks}`);
-      }
+      const slowHooks = Object.entries(timings)
+        .filter(([_, time]) => time > 5)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, time]) => `${name}=${time}ms`)
+        .join(", ");
+      log(`[perf] event(${input.event.type}) ${totalTime}ms ${slowHooks ? `| ${slowHooks}` : ""}`)
 
       const { event } = input;
       const props = event.properties as Record<string, unknown> | undefined;
@@ -557,14 +555,12 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       timings.sisyphusOrchestrator = Date.now() - start;
 
       const totalTime = Date.now() - toolBeforeStart;
-      if (totalTime > 100) {
-        const slowHooks = Object.entries(timings)
-          .filter(([_, time]) => time > 10)
-          .sort((a, b) => b[1] - a[1])
-          .map(([name, time]) => `${name}=${time}ms`)
-          .join(", ");
-        log(`[perf] tool.execute.before(${input.tool}) took ${totalTime}ms. Slow: ${slowHooks}`);
-      }
+      const slowHooks = Object.entries(timings)
+        .filter(([_, time]) => time > 5)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, time]) => `${name}=${time}ms`)
+        .join(", ");
+      log(`[perf] before(${input.tool}) ${totalTime}ms ${slowHooks ? `| ${slowHooks}` : ""}`)
 
       if (input.tool === "task") {
         const args = output.args as Record<string, unknown>;
@@ -668,14 +664,12 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       timings.taskResumeInfo = Date.now() - start;
 
       const totalTime = Date.now() - toolAfterStart;
-      if (totalTime > 100) {
-        const slowHooks = Object.entries(timings)
-          .filter(([_, time]) => time > 10)
-          .sort((a, b) => b[1] - a[1])
-          .map(([name, time]) => `${name}=${time}ms`)
-          .join(", ");
-        log(`[perf] tool.execute.after(${input.tool}) took ${totalTime}ms. Slow: ${slowHooks}`);
-      }
+      const slowHooks = Object.entries(timings)
+        .filter(([_, time]) => time > 5)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, time]) => `${name}=${time}ms`)
+        .join(", ");
+      log(`[perf] after(${input.tool}) ${totalTime}ms ${slowHooks ? `| ${slowHooks}` : ""}`)
     },
   };
 };
