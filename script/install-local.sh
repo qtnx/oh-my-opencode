@@ -9,7 +9,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Config
-REPO_URL="https://github.com/qtx/oh-my-opencode.git"
+REPO_URL="https://github.com/qtnx/oh-my-opencode.git"
 DEFAULT_BRANCH="dev"
 INSTALL_DIR="${OMO_INSTALL_DIR:-$HOME/.local/share/oh-my-opencode}"
 PLUGIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/plugin"
@@ -453,7 +453,7 @@ cmd_help() {
     echo ""
     echo "Examples:"
     echo "  # Install or update (one command for everything)"
-    echo "  curl -fsSL https://raw.githubusercontent.com/qtx/oh-my-opencode/dev/script/install-local.sh | bash"
+    echo "  curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/dev/script/install-local.sh | bash"
     echo ""
 }
 
