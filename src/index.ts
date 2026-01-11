@@ -79,6 +79,8 @@ import { createModelCacheState, getModelLimit } from "./plugin-state";
 import { createConfigHandler } from "./plugin-handlers";
 
 const OhMyOpenCodePlugin: Plugin = async (ctx) => {
+  log("[perf] Plugin loaded - perf timing enabled v2");
+
   // Start background tmux check immediately
   startTmuxCheck();
 
