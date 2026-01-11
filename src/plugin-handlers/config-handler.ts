@@ -20,16 +20,17 @@ import {
   loadUserAgents,
   loadProjectAgents,
 } from "../features/claude-code-agent-loader";
-import {
-  loadAllOpencodeAgents,
-} from "../features/opencode-agent-loader";
+import { loadAllOpencodeAgents } from "../features/opencode-agent-loader";
 import { loadMcpConfigs } from "../features/claude-code-mcp-loader";
 import { loadAllPluginComponents } from "../features/claude-code-plugin-loader";
 import { createBuiltinMcps } from "../mcp";
 import type { OhMyOpenCodeConfig } from "../config";
 import { log } from "../shared";
 import { migrateAgentConfig } from "../shared/permission-compat";
-import { PROMETHEUS_SYSTEM_PROMPT, PROMETHEUS_PERMISSION } from "../agents/prometheus-prompt";
+import {
+  PROMETHEUS_SYSTEM_PROMPT,
+  PROMETHEUS_PERMISSION,
+} from "../agents/prometheus-prompt";
 import type { ModelCacheState } from "../plugin-state";
 
 export interface ConfigHandlerDeps {
@@ -64,7 +65,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
             if (contextLimit) {
               modelCacheState.modelContextLimitsCache.set(
                 `${providerID}/${modelID}`,
-                contextLimit
+                contextLimit,
               );
             }
           }
@@ -72,19 +73,20 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       }
     }
 
-    const pluginComponents = (pluginConfig.claude_code?.plugins ?? true)
-      ? await loadAllPluginComponents({
-          enabledPluginsOverride: pluginConfig.claude_code?.plugins_override,
-        })
-      : {
-          commands: {},
-          skills: {},
-          agents: {},
-          mcpServers: {},
-          hooksConfigs: [],
-          plugins: [],
-          errors: [],
-        };
+    const pluginComponents =
+      (pluginConfig.claude_code?.plugins ?? true)
+        ? await loadAllPluginComponents({
+            enabledPluginsOverride: pluginConfig.claude_code?.plugins_override,
+          })
+        : {
+            commands: {},
+            skills: {},
+            agents: {},
+            mcpServers: {},
+            hooksConfigs: [],
+            plugins: [],
+            errors: [],
+          };
 
     if (pluginComponents.plugins.length > 0) {
       log(`Loaded ${pluginComponents.plugins.length} Claude Code plugins`, {
@@ -96,34 +98,35 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       log(`Plugin load errors`, { errors: pluginComponents.errors });
     }
 
-    const { agents: builtinAgents, availableAgents: builtinAvailableAgents } = createBuiltinAgents(
-      pluginConfig.disabled_agents,
-      pluginConfig.agents,
-      ctx.directory,
-      config.model as string | undefined
-    );
+    const { agents: builtinAgents, availableAgents: builtinAvailableAgents } =
+      createBuiltinAgents(
+        pluginConfig.disabled_agents,
+        pluginConfig.agents,
+        ctx.directory,
+        config.model as string | undefined,
+      );
 
     // Claude Code agents: Do NOT apply permission migration
     // Claude Code uses whitelist-based tools format which is semantically different
     // from OpenCode's denylist-based permission system
-    const userAgents = (pluginConfig.claude_code?.agents ?? true)
-      ? loadUserAgents()
-      : {};
-    const projectAgents = (pluginConfig.claude_code?.agents ?? true)
-      ? loadProjectAgents()
-      : {};
+    const userAgents =
+      (pluginConfig.claude_code?.agents ?? true) ? loadUserAgents() : {};
+    const projectAgents =
+      (pluginConfig.claude_code?.agents ?? true) ? loadProjectAgents() : {};
 
     // OpenCode agents: load from .opencode/agent/ and ~/.config/opencode/agent/
     // Only agents with omo_agent metadata are loaded
     const opencodeAgents = loadAllOpencodeAgents();
     const opencodeAgentConfigs = Object.fromEntries(
-      opencodeAgents.map((a) => [a.name, a.config])
+      opencodeAgents.map((a) => [a.name, a.config]),
     );
-    const opencodeAvailableAgents: AvailableAgent[] = opencodeAgents.map((a) => ({
-      name: a.name as BuiltinAgentName,
-      description: a.config.description ?? "",
-      metadata: a.metadata,
-    }));
+    const opencodeAvailableAgents: AvailableAgent[] = opencodeAgents.map(
+      (a) => ({
+        name: a.name as BuiltinAgentName,
+        description: a.config.description ?? "",
+        metadata: a.metadata,
+      }),
+    );
 
     if (opencodeAgents.length > 0) {
       log(`Loaded ${opencodeAgents.length} OpenCode agents`, {
@@ -137,20 +140,16 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       Object.entries(rawPluginAgents).map(([k, v]) => [
         k,
         v ? migrateAgentConfig(v as Record<string, unknown>) : v,
-      ])
+      ]),
     );
 
     const isSisyphusEnabled = pluginConfig.sisyphus_agent?.disabled !== true;
     const builderEnabled =
       pluginConfig.sisyphus_agent?.default_builder_enabled ?? false;
-    const plannerEnabled =
-      pluginConfig.sisyphus_agent?.planner_enabled ?? true;
+    const plannerEnabled = pluginConfig.sisyphus_agent?.planner_enabled ?? true;
     const replacePlan = pluginConfig.sisyphus_agent?.replace_plan ?? true;
 
-    type AgentConfig = Record<
-      string,
-      Record<string, unknown> | undefined
-    > & {
+    type AgentConfig = Record<string, Record<string, unknown> | undefined> & {
       build?: Record<string, unknown>;
       plan?: Record<string, unknown>;
       explore?: { tools?: Record<string, unknown> };
@@ -168,7 +167,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       };
 
       agentConfig["Sisyphus-Junior"] = createSisyphusJuniorAgent({
-        model: "anthropic/claude-sonnet-4-5",
+        model: "anthropic/claude-opus-4-5",
         temperature: 0.1,
       });
 
@@ -176,7 +175,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
         const { name: _buildName, ...buildConfigWithoutName } =
           configAgent?.build ?? {};
         const migratedBuildConfig = migrateAgentConfig(
-          buildConfigWithoutName as Record<string, unknown>
+          buildConfigWithoutName as Record<string, unknown>,
         );
         const openCodeBuilderOverride =
           pluginConfig.agents?.["OpenCode-Builder"];
@@ -191,10 +190,13 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       }
 
       if (plannerEnabled) {
-        const { name: _planName, mode: _planMode, ...planConfigWithoutName } =
-          configAgent?.plan ?? {};
+        const {
+          name: _planName,
+          mode: _planMode,
+          ...planConfigWithoutName
+        } = configAgent?.plan ?? {};
         const migratedPlanConfig = migrateAgentConfig(
-          planConfigWithoutName as Record<string, unknown>
+          planConfigWithoutName as Record<string, unknown>,
         );
         const prometheusOverride =
           pluginConfig.agents?.["Prometheus (Planner)"];
@@ -213,20 +215,22 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
           : prometheusBase;
       }
 
-    const filteredConfigAgents = configAgent
-      ? Object.fromEntries(
-          Object.entries(configAgent)
-            .filter(([key]) => {
-              if (key === "build") return false;
-              if (key === "plan" && replacePlan) return false;
-              return true;
-            })
-            .map(([key, value]) => [
-              key,
-              value ? migrateAgentConfig(value as Record<string, unknown>) : value,
-            ])
-        )
-      : {};
+      const filteredConfigAgents = configAgent
+        ? Object.fromEntries(
+            Object.entries(configAgent)
+              .filter(([key]) => {
+                if (key === "build") return false;
+                if (key === "plan" && replacePlan) return false;
+                return true;
+              })
+              .map(([key, value]) => [
+                key,
+                value
+                  ? migrateAgentConfig(value as Record<string, unknown>)
+                  : value,
+              ]),
+          )
+        : {};
 
       const migratedBuild = configAgent?.build
         ? migrateAgentConfig(configAgent.build as Record<string, unknown>)
@@ -239,7 +243,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       config.agent = {
         ...agentConfig,
         ...Object.fromEntries(
-          Object.entries(builtinAgents).filter(([k]) => k !== "Sisyphus")
+          Object.entries(builtinAgents).filter(([k]) => k !== "Sisyphus"),
         ),
         ...userAgents,
         ...projectAgents,
@@ -275,7 +279,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
     if (orchestratorOverride) {
       const mergedOrchestrator = mergeAgentConfig(
         orchestratorConfig,
-        orchestratorOverride
+        orchestratorOverride,
       );
       (config.agent as Record<string, unknown>)["orchestrator-sisyphus"] =
         mergedOrchestrator;
@@ -326,9 +330,10 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       external_directory: "allow",
     };
 
-    const mcpResult = (pluginConfig.claude_code?.mcp ?? true)
-      ? await loadMcpConfigs()
-      : { servers: {} };
+    const mcpResult =
+      (pluginConfig.claude_code?.mcp ?? true)
+        ? await loadMcpConfigs()
+        : { servers: {} };
 
     config.mcp = {
       ...(config.mcp as Record<string, unknown>),
