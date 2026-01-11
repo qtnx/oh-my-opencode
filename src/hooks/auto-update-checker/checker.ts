@@ -56,6 +56,7 @@ function getConfigPaths(directory: string): string[] {
 }
 
 export function getLocalDevPath(directory: string): string | null {
+  // Check for file:// entries in opencode.json
   for (const configPath of getConfigPaths(directory)) {
     try {
       if (!fs.existsSync(configPath)) continue
@@ -70,6 +71,37 @@ export function getLocalDevPath(directory: string): string | null {
           } catch {
             return entry.replace("file://", "")
           }
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+
+  // Check for symlinks in plugin directories
+  const pluginDirs = [
+    path.join(directory, ".opencode", "plugin"),
+    path.join(USER_CONFIG_DIR, "opencode", "plugin"),
+  ]
+
+  for (const pluginDir of pluginDirs) {
+    try {
+      if (!fs.existsSync(pluginDir)) continue
+
+      const files = fs.readdirSync(pluginDir)
+      for (const file of files) {
+        if (!file.includes(PACKAGE_NAME)) continue
+
+        const filePath = path.join(pluginDir, file)
+        const stat = fs.lstatSync(filePath)
+
+        if (stat.isSymbolicLink()) {
+          const target = fs.readlinkSync(filePath)
+          // Resolve to absolute path if relative
+          const absoluteTarget = path.isAbsolute(target)
+            ? target
+            : path.resolve(pluginDir, target)
+          return absoluteTarget
         }
       }
     } catch {
