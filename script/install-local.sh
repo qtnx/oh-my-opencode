@@ -453,7 +453,7 @@ cmd_help() {
     echo ""
     echo "Examples:"
     echo "  # Install or update (one command for everything)"
-    echo "  curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/dev/script/install-local.sh | bash"
+    echo "  curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/refs/heads/dev/script/install-local.sh | bash"
     echo ""
 }
 
