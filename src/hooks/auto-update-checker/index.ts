@@ -92,16 +92,22 @@ export function createAutoUpdateCheckerHook(ctx: PluginInput, options: AutoUpdat
         await updateAndShowConnectedProvidersCacheStatus(ctx)
 
         if (localDevVersion) {
-          if (showStartupToast) {
-            showLocalDevToast(ctx, displayVersion, isSisyphusEnabled).catch(() => {})
-          }
           log("[auto-update-checker] Local development mode")
 
-          // Check for git updates in local dev mode
+          // Check for git updates first, then show appropriate toast
           if (autoUpdate) {
-            runLocalDevUpdateCheck(ctx, isSisyphusEnabled).catch(err => {
+            const updated = await runLocalDevUpdateCheck(ctx, isSisyphusEnabled).catch(err => {
               log("[auto-update-checker] Local dev update check failed:", err)
+              return false
             })
+
+            // If updated, toast was already shown by runLocalDevUpdateCheck
+            if (updated) return
+          }
+
+          // No update or autoUpdate disabled - show normal toast
+          if (showStartupToast) {
+            showLocalDevToast(ctx, displayVersion, isSisyphusEnabled).catch(() => {})
           }
           return
         }
@@ -328,17 +334,17 @@ async function showLocalDevToast(ctx: PluginInput, version: string | null, isSis
 // Git-based auto-update for local dev mode
 // ============================================
 
-async function runLocalDevUpdateCheck(ctx: PluginInput, isSisyphusEnabled: boolean): Promise<void> {
+async function runLocalDevUpdateCheck(ctx: PluginInput, isSisyphusEnabled: boolean): Promise<boolean> {
   const localDevPath = getLocalDevPath(ctx.directory)
   if (!localDevPath) {
     log("[git-update] No local dev path found")
-    return
+    return false
   }
 
   const repoRoot = getGitRepoRoot(localDevPath)
   if (!repoRoot) {
     log("[git-update] No git repository found")
-    return
+    return false
   }
 
   const gitInfo = getGitShortInfo(repoRoot)
@@ -350,7 +356,7 @@ async function runLocalDevUpdateCheck(ctx: PluginInput, isSisyphusEnabled: boole
 
   if (!updateResult.hasUpdates) {
     log("[git-update] Already up to date")
-    return
+    return false
   }
 
   log(`[git-update] Updates available, starting auto-update...`)
@@ -387,6 +393,7 @@ async function runLocalDevUpdateCheck(ctx: PluginInput, isSisyphusEnabled: boole
       .catch(() => {})
 
     log(`[git-update] Update successful: ${currentInfo} → ${newInfo}`)
+    return true
   } else {
     await ctx.client.tui
       .showToast({
@@ -400,6 +407,7 @@ async function runLocalDevUpdateCheck(ctx: PluginInput, isSisyphusEnabled: boole
       .catch(() => {})
 
     log("[git-update] Update failed")
+    return false
   }
 }
 
