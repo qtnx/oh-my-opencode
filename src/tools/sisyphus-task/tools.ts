@@ -303,6 +303,7 @@ ${textContent || "(No text output)"}`
       let agentToUse: string
       let categoryModel: { providerID: string; modelID: string } | undefined
       let categoryPromptAppend: string | undefined
+      let modelWarning: string | undefined
 
       if (args.category) {
         const resolved = resolveCategoryConfig(args.category, userCategories)
@@ -313,16 +314,24 @@ ${textContent || "(No text output)"}`
         agentToUse = SISYPHUS_JUNIOR_AGENT
         categoryModel = parseModelString(resolved.config.model)
         categoryPromptAppend = resolved.promptAppend || undefined
+
+        if (!categoryModel) {
+          modelWarning = `⚠️ Warning: No valid model config found for category "${args.category}". Using OpenCode default model.`
+        }
       } else {
         agentToUse = args.subagent_type!.trim()
         if (!agentToUse) {
           return `❌ Agent name cannot be empty.`
         }
 
-        // Validate agent exists and is callable (not a primary agent)
+        // Validate agent exists, is callable (not a primary agent), and extract model
         try {
           const agentsResult = await client.app.agents()
-          type AgentInfo = { name: string; mode?: "subagent" | "primary" | "all" }
+          type AgentInfo = {
+            name: string
+            mode?: "subagent" | "primary" | "all"
+            model?: { providerID: string; modelID: string }
+          }
           const agents = (agentsResult as { data?: AgentInfo[] }).data ?? agentsResult as unknown as AgentInfo[]
 
           const callableAgents = agents.filter((a) => a.mode !== "primary")
@@ -339,8 +348,17 @@ ${textContent || "(No text output)"}`
               .join(", ")
             return `❌ Unknown agent: "${agentToUse}". Available agents: ${availableAgents}`
           }
+
+          // Extract model from agent config
+          const targetAgent = callableAgents.find((a) => a.name === agentToUse)
+          if (targetAgent?.model) {
+            categoryModel = targetAgent.model
+          } else {
+            modelWarning = `⚠️ Warning: Agent "${agentToUse}" has no model configured. Using OpenCode default model.`
+          }
         } catch {
           // If we can't fetch agents, proceed anyway - the session.prompt will fail with a clearer error
+          modelWarning = `⚠️ Warning: Could not fetch agent config for "${agentToUse}". Using OpenCode default model.`
         }
       }
 
@@ -366,8 +384,9 @@ ${textContent || "(No text output)"}`
             metadata: { sessionId: task.sessionID, category: args.category },
           })
 
+          const warningLine = modelWarning ? `\n${modelWarning}\n` : ""
           return `Background task launched.
-
+${warningLine}
 Task ID: ${task.id}
 Session ID: ${task.sessionID}
 Description: ${task.description}
@@ -419,13 +438,14 @@ System notifies on completion. Use \`background_output\` with task_id="${task.id
         })
 
         // Use fire-and-forget prompt() - awaiting causes JSON parse errors with thinking models
-        // Note: Don't pass model in body - use agent's configured model instead
+        // Pass model explicitly if extracted from category config or agent config
         let promptError: Error | undefined
         client.session.prompt({
           path: { id: sessionID },
           body: {
             agent: agentToUse,
             system: systemContent,
+            model: categoryModel,
             tools: {
               task: false,
               sisyphus_task: false,
@@ -544,8 +564,9 @@ System notifies on completion. Use \`background_output\` with task_id="${task.id
 
         subagentSessions.delete(sessionID)
 
+        const warningLine = modelWarning ? `\n${modelWarning}\n` : ""
         return `Task completed in ${duration}.
-
+${warningLine}
 Agent: ${agentToUse}${args.category ? ` (category: ${args.category})` : ""}
 Session ID: ${sessionID}
 
