@@ -253,7 +253,7 @@ For team members who want to install from source with easy updates:
 
 ```bash
 # One command for everything (install or update)
-curl -fsSL https://raw.githubusercontent.com/qtx/oh-my-opencode/dev/script/install-local.sh | bash
+curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/dev/script/install-local.sh | bash
 ```
 
 This will:
@@ -268,13 +268,13 @@ This will:
 **Other commands:**
 ```bash
 # Check status
-curl -fsSL https://raw.githubusercontent.com/qtx/oh-my-opencode/dev/script/install-local.sh | bash -s status
+curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/dev/script/install-local.sh | bash -s status
 
 # Rebuild without pulling (for local changes)
-curl -fsSL https://raw.githubusercontent.com/qtx/oh-my-opencode/dev/script/install-local.sh | bash -s rebuild
+curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/dev/script/install-local.sh | bash -s rebuild
 
 # Uninstall
-curl -fsSL https://raw.githubusercontent.com/qtx/oh-my-opencode/dev/script/install-local.sh | bash -s uninstall
+curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/dev/script/install-local.sh | bash -s uninstall
 ```
 
 ### For LLM Agents
