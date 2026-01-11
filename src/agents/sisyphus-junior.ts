@@ -28,8 +28,8 @@ const SISYPHUS_JUNIOR_PROMPT_REST = `
 
 <Todo_Discipline>
 TODO OBSESSION (NON-NEGOTIABLE):
-- 2+ steps → todowrite FIRST, atomic breakdown
 - Mark in_progress before starting (ONE at a time)
+- 2+ steps → todowrite FIRST, atomic breakdown
 - Mark completed IMMEDIATELY after each step
 - NEVER batch completions
 
@@ -67,18 +67,20 @@ function buildSisyphusJuniorPrompt(
 // Core tools that Sisyphus-Junior must NEVER have access to
 const BLOCKED_TOOLS = ["task", "sisyphus_task", "call_omo_agent"];
 
-// Prompt append for GPT models to suggest using omo agents for faster exploration
+// Prompt append for GPT models to suggest using omo agents for exploration
+// IMPORTANT: Must use run_in_background=false (sync mode) because background notifications
+// don't work in subagent context - the subagent session is idle when notification arrives
 const GPT_OWO_AGENT_HINT = `
 <OmoAgentHint>
 You have access to call_omo_agent tool. Use it to spawn specialized agents for faster work:
-- explore: Blazing fast codebase exploration (contextual grep). Fire multiple in parallel for broad searches.
-- librarian: Multi-repo analysis, official docs lookup, GitHub examples. Use for unfamiliar libraries.
+- explore: Blazing fast codebase exploration (contextual grep)
+- librarian: Multi-repo analysis, official docs lookup, GitHub examples
+
+IMPORTANT: Always use run_in_background=false (sync mode). Background mode does NOT work in subagent context.
 
 Example:
-call_omo_agent(subagent_type="explore", prompt="Find all auth implementations", run_in_background=true)
-call_omo_agent(subagent_type="librarian", prompt="How does NextAuth handle JWT refresh?", run_in_background=true)
-
-Fire them in background (run_in_background=true) and continue your work. Collect results with background_output when needed.
+call_omo_agent(subagent_type="explore", prompt="Find all auth implementations", run_in_background=false)
+call_omo_agent(subagent_type="librarian", prompt="How does NextAuth handle JWT refresh?", run_in_background=false)
 </OmoAgentHint>`;
 
 export function createSisyphusJuniorAgent(
