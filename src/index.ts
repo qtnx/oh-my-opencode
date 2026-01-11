@@ -63,6 +63,7 @@ import {
   createSisyphusTask,
   interactive_bash,
   startTmuxCheck,
+  lspManager,
 } from "./tools";
 import { BackgroundManager } from "./features/background-agent";
 import { SkillMcpManager } from "./features/skill-mcp-manager";
@@ -164,7 +165,7 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       })
     : null;
   const keywordDetector = isHookEnabled("keyword-detector")
-    ? createKeywordDetectorHook(ctx)
+    ? createKeywordDetectorHook(ctx, contextCollector)
     : null;
   const contextInjector = createContextInjectorHook(contextCollector);
   const contextInjectorMessagesTransform =
@@ -236,6 +237,7 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     manager: backgroundManager,
     client: ctx.client,
     userCategories: pluginConfig.categories,
+    gitMasterConfig: pluginConfig.git_master,
   });
   const disabledSkills = new Set(pluginConfig.disabled_skills ?? []);
   const systemMcpNames = getSystemMcpServerNames();
@@ -312,8 +314,8 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     },
 
     "chat.message": async (input, output) => {
-      await claudeCodeHooks["chat.message"]?.(input, output);
       await keywordDetector?.["chat.message"]?.(input, output);
+      await claudeCodeHooks["chat.message"]?.(input, output);
       await contextInjector["chat.message"]?.(input, output);
       await autoSlashCommand?.["chat.message"]?.(input, output);
       await startWork?.["chat.message"]?.(input, output);
@@ -427,6 +429,7 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
         }
         if (sessionInfo?.id) {
           await skillMcpManager.disconnectSession(sessionInfo.id);
+          await lspManager.cleanupTempDirectoryClients();
         }
       }
 
