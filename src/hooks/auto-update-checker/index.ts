@@ -266,11 +266,18 @@ async function showAutoUpdatedToast(ctx: PluginInput, oldVersion: string, newVer
 
 async function showLocalDevToast(ctx: PluginInput, version: string | null, isSisyphusEnabled: boolean): Promise<void> {
   const displayVersion = version ?? "dev"
+
+  // Get git commit info for local dev display
+  const localDevPath = getLocalDevPath(ctx.directory)
+  const repoRoot = localDevPath ? getGitRepoRoot(localDevPath) : null
+  const gitInfo = repoRoot ? getGitShortInfo(repoRoot) : null
+  const commitInfo = gitInfo ? ` @${gitInfo.commit}` : ""
+
   const message = isSisyphusEnabled
-    ? "Sisyphus running in local development mode."
-    : "Running in local development mode. oMoMoMo..."
+    ? `Sisyphus running in local dev mode.${commitInfo}`
+    : `Running in local dev mode.${commitInfo} oMoMoMo...`
   await showSpinnerToast(ctx, `${displayVersion} (dev)`, message)
-  log(`[auto-update-checker] Local dev toast shown: v${displayVersion}`)
+  log(`[auto-update-checker] Local dev toast shown: v${displayVersion}${commitInfo}`)
 }
 
 // ============================================
