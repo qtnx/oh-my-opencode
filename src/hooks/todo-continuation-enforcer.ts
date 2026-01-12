@@ -233,7 +233,8 @@ export function createTodoContinuationEnforcer(
       await ctx.client.session.prompt({
         path: { id: sessionID },
         body: {
-          agent: agentName,
+          // Only include agent field if defined (undefined would cause agent switch)
+          ...(agentName !== undefined ? { agent: agentName } : {}),
           ...(model !== undefined ? { model } : {}),
           parts: [{ type: "text", text: prompt }],
         },
