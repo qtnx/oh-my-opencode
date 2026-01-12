@@ -9,6 +9,14 @@ import { consumeNewMessages } from "../../shared/session-cursor"
 import { findFirstMessageWithAgent, findNearestMessageWithFields, MESSAGE_STORAGE } from "../../features/hook-message-injector"
 import { getSessionAgent } from "../../features/claude-code-session-state"
 
+type ToolContextWithMetadata = {
+  sessionID: string
+  messageID: string
+  agent: string
+  abort: AbortSignal
+  metadata?: (input: { title?: string; metadata?: Record<string, unknown> }) => void
+}
+
 function getMessageDir(sessionID: string): string | null {
   if (!existsSync(MESSAGE_STORAGE)) return null
 
@@ -21,14 +29,6 @@ function getMessageDir(sessionID: string): string | null {
   }
 
   return null
-}
-
-type ToolContextWithMetadata = {
-  sessionID: string
-  messageID: string
-  agent: string
-  abort: AbortSignal
-  metadata?: (input: { title?: string; metadata?: Record<string, unknown> }) => void
 }
 
 export function createCallOmoAgent(
@@ -85,18 +85,23 @@ async function executeBackground(
   try {
     const messageDir = getMessageDir(toolContext.sessionID)
     const prevMessage = messageDir ? findNearestMessageWithFields(messageDir) : null
-    const firstMessageAgent = messageDir ? findFirstMessageWithAgent(messageDir) : null
     const sessionAgent = getSessionAgent(toolContext.sessionID)
-    const parentAgent = toolContext.agent ?? sessionAgent ?? firstMessageAgent ?? prevMessage?.agent
+    const firstMessageAgent = messageDir ? findFirstMessageWithAgent(messageDir) : null
     
+    // Resolve parentAgent with priority chain:
+    // 1. toolContext.agent (current agent from tool context)
+    // 2. sessionAgent (tracked from user messages in memory)
+    // 3. firstMessageAgent (original agent from first message file)
+    // 4. prevMessage?.agent (fallback to nearest message)
+    const parentAgent = toolContext.agent ?? sessionAgent ?? firstMessageAgent ?? prevMessage?.agent
+
     log("[call_omo_agent] parentAgent resolution", {
       sessionID: toolContext.sessionID,
-      messageDir,
       ctxAgent: toolContext.agent,
       sessionAgent,
       firstMessageAgent,
       prevMessageAgent: prevMessage?.agent,
-      resolvedParentAgent: parentAgent,
+      resolved: parentAgent,
     })
 
     const task = await manager.launch({
@@ -105,8 +110,7 @@ async function executeBackground(
       agent: args.subagent_type,
       parentSessionID: toolContext.sessionID,
       parentMessageID: toolContext.messageID,
-      // Preserve parent agent context so notifications return to correct agent
-      parentAgent: toolContext.agent,
+      parentAgent,
     })
 
     toolContext.metadata?.({

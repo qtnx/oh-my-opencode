@@ -41,6 +41,8 @@ export interface BackgroundTask {
   lastMsgCount?: number
   /** Number of consecutive polls with stable message count */
   stablePolls?: number
+  /** Number of consecutive idle events with stable message count */
+  idleEventCount?: number
 }
 
 export interface LaunchInput {

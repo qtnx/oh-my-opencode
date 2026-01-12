@@ -35,3 +35,23 @@ export function getSessionAgent(sessionID: string): string | undefined {
 export function clearSessionAgent(sessionID: string): void {
   sessionAgentMap.delete(sessionID)
 }
+
+const sessionAgentMap = new Map<string, string>()
+
+export function setSessionAgent(sessionID: string, agent: string): void {
+  if (!sessionAgentMap.has(sessionID)) {
+    sessionAgentMap.set(sessionID, agent)
+  }
+}
+
+export function updateSessionAgent(sessionID: string, agent: string): void {
+  sessionAgentMap.set(sessionID, agent)
+}
+
+export function getSessionAgent(sessionID: string): string | undefined {
+  return sessionAgentMap.get(sessionID)
+}
+
+export function clearSessionAgent(sessionID: string): void {
+  sessionAgentMap.delete(sessionID)
+}

@@ -418,6 +418,9 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       const { event } = input;
       const props = event.properties as Record<string, unknown> | undefined;
 
+      // Forward events to BackgroundManager for task completion detection
+      backgroundManager.handleEvent(event as Parameters<typeof backgroundManager.handleEvent>[0]);
+
       if (event.type === "session.created") {
         const sessionInfo = props?.info as
           | { id?: string; title?: string; parentID?: string }

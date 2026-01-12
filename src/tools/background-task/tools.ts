@@ -66,19 +66,25 @@ export function createBackgroundTask(manager: BackgroundManager): ToolDefinition
       try {
         const messageDir = getMessageDir(ctx.sessionID)
         const prevMessage = messageDir ? findNearestMessageWithFields(messageDir) : null
-        const firstMessageAgent = messageDir ? findFirstMessageWithAgent(messageDir) : null
         const sessionAgent = getSessionAgent(ctx.sessionID)
-        const parentAgent = ctx.agent ?? sessionAgent ?? firstMessageAgent ?? prevMessage?.agent
+        const firstMessageAgent = messageDir ? findFirstMessageWithAgent(messageDir) : null
         
-        log("[background_task] parentAgent resolution", {
+        // Resolve parentAgent with priority chain:
+        // 1. ctx.agent (current agent from tool context)
+        // 2. sessionAgent (tracked from user messages in memory)
+        // 3. firstMessageAgent (original agent from first message file)
+        // 4. prevMessage?.agent (fallback to nearest message)
+        const parentAgent = ctx.agent ?? sessionAgent ?? firstMessageAgent ?? prevMessage?.agent
+
+        log("[background-task] parentAgent resolution", {
           sessionID: ctx.sessionID,
           ctxAgent: ctx.agent,
           sessionAgent,
           firstMessageAgent,
           prevMessageAgent: prevMessage?.agent,
-          resolvedParentAgent: parentAgent,
+          resolved: parentAgent,
         })
-        
+
         const parentModel = prevMessage?.model?.providerID && prevMessage?.model?.modelID
           ? { providerID: prevMessage.model.providerID, modelID: prevMessage.model.modelID }
           : undefined
