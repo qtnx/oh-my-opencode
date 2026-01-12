@@ -191,21 +191,28 @@ async function executeSync(
   log(`[call_omo_agent] Sending prompt to session ${sessionID}`)
   log(`[call_omo_agent] Prompt text:`, args.prompt.substring(0, 100))
 
-  try {
-    await ctx.client.session.prompt({
-      path: { id: sessionID },
-      body: {
-        agent: args.subagent_type,
-        tools: {
-          ...getAgentToolRestrictions(args.subagent_type),
-          task: false,
-          delegate_task: false,
-        },
-        parts: [{ type: "text", text: args.prompt }],
+  // Use fire-and-forget prompt - awaiting causes issues with thinking models
+  let promptError: Error | undefined
+  ctx.client.session.prompt({
+    path: { id: sessionID },
+    body: {
+      agent: args.subagent_type,
+      tools: {
+        ...getAgentToolRestrictions(args.subagent_type),
+        task: false,
+        delegate_task: false,
       },
-    })
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
+      parts: [{ type: "text", text: args.prompt }],
+    },
+  }).catch((error) => {
+    promptError = error instanceof Error ? error : new Error(String(error))
+  })
+
+  // Small delay to let the prompt start
+  await new Promise(resolve => setTimeout(resolve, 100))
+
+  if (promptError) {
+    const errorMessage = promptError.message
     log(`[call_omo_agent] Prompt error:`, errorMessage)
     if (errorMessage.includes("agent.name") || errorMessage.includes("undefined")) {
       return `Error: Agent "${args.subagent_type}" not found. Make sure the agent is registered in your opencode.json or provided by a plugin.\n\n<task_metadata>\nsession_id: ${sessionID}\n</task_metadata>`
@@ -215,13 +222,14 @@ async function executeSync(
 
   log(`[call_omo_agent] Prompt sent, polling for completion...`)
 
-  // Poll for session completion
+  // Poll for session completion with stability detection
   const POLL_INTERVAL_MS = 500
-  const MAX_POLL_TIME_MS = 5 * 60 * 1000 // 5 minutes max
+  const MAX_POLL_TIME_MS = 10 * 60 * 1000
+  const MIN_STABILITY_TIME_MS = 10000  // Minimum 10s before accepting completion
+  const STABILITY_POLLS_REQUIRED = 3
   const pollStart = Date.now()
   let lastMsgCount = 0
   let stablePolls = 0
-  const STABILITY_REQUIRED = 3
 
   while (Date.now() - pollStart < MAX_POLL_TIME_MS) {
     // Check if aborted
@@ -232,7 +240,16 @@ async function executeSync(
 
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
 
-    // Check session status
+    // Check for async errors
+    if (promptError) {
+      const errorMessage = promptError.message
+      log(`[call_omo_agent] Async prompt error:`, errorMessage)
+      if (errorMessage.includes("agent.name") || errorMessage.includes("undefined")) {
+        return `Error: Agent "${args.subagent_type}" not found. Make sure the agent is registered in your opencode.json or provided by a plugin.\n\n<task_metadata>\nsession_id: ${sessionID}\n</task_metadata>`
+      }
+      return `Error: Failed to send prompt: ${errorMessage}\n\n<task_metadata>\nsession_id: ${sessionID}\n</task_metadata>`
+    }
+
     const statusResult = await ctx.client.session.status()
     const allStatuses = (statusResult.data ?? {}) as Record<string, { type: string }>
     const sessionStatus = allStatuses[sessionID]
@@ -244,16 +261,22 @@ async function executeSync(
       continue
     }
 
-    // Session is idle - check message stability
+    // Session is idle or not in status - check message stability
+    const elapsed = Date.now() - pollStart
+    if (elapsed < MIN_STABILITY_TIME_MS) {
+      continue  // Don't accept completion too early
+    }
+
+    // Get current message count
     const messagesCheck = await ctx.client.session.messages({ path: { id: sessionID } })
     const msgs = ((messagesCheck as { data?: unknown }).data ?? messagesCheck) as Array<unknown>
     const currentMsgCount = msgs.length
 
     if (currentMsgCount > 0 && currentMsgCount === lastMsgCount) {
       stablePolls++
-      if (stablePolls >= STABILITY_REQUIRED) {
+      if (stablePolls >= STABILITY_POLLS_REQUIRED) {
         log(`[call_omo_agent] Session complete, ${currentMsgCount} messages`)
-        break
+        break  // Messages stable for 3 polls - task complete
       }
     } else {
       stablePolls = 0
@@ -263,8 +286,10 @@ async function executeSync(
 
   if (Date.now() - pollStart >= MAX_POLL_TIME_MS) {
     log(`[call_omo_agent] Timeout reached`)
-    return `Error: Agent task timed out after 5 minutes.\n\n<task_metadata>\nsession_id: ${sessionID}\n</task_metadata>`
+    return `Error: Agent task timed out after 10 minutes.\n\n<task_metadata>\nsession_id: ${sessionID}\n</task_metadata>`
   }
+
+  log(`[call_omo_agent] Session completed, fetching messages...`)
 
   const messagesResult = await ctx.client.session.messages({
     path: { id: sessionID },
