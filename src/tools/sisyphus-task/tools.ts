@@ -5,11 +5,12 @@ import type { BackgroundManager } from "../../features/background-agent"
 import type { SisyphusTaskArgs } from "./types"
 import type { CategoryConfig, CategoriesConfig, GitMasterConfig } from "../../config/schema"
 import { SISYPHUS_TASK_DESCRIPTION, DEFAULT_CATEGORIES, CATEGORY_PROMPT_APPENDS } from "./constants"
-import { findNearestMessageWithFields, MESSAGE_STORAGE } from "../../features/hook-message-injector"
+import { findNearestMessageWithFields, findFirstMessageWithAgent, MESSAGE_STORAGE } from "../../features/hook-message-injector"
 import { resolveMultipleSkills } from "../../features/opencode-skill-loader/skill-content"
 import { createBuiltinSkills } from "../../features/builtin-skills/skills"
 import { getTaskToastManager } from "../../features/task-toast-manager"
-import { subagentSessions } from "../../features/claude-code-session-state"
+import { subagentSessions, getSessionAgent } from "../../features/claude-code-session-state"
+import { log } from "../../shared/logger"
 
 type OpencodeClient = PluginInput["client"]
 
@@ -147,10 +148,27 @@ export function createSisyphusTask(options: SisyphusTaskToolOptions): ToolDefini
 
       const messageDir = getMessageDir(ctx.sessionID)
       const prevMessage = messageDir ? findNearestMessageWithFields(messageDir) : null
-      const parentAgent = ctx.agent ?? prevMessage?.agent
+
+      // Resolve parentAgent with priority chain:
+      // 1. ctx.agent (current agent from tool context)
+      // 2. sessionAgent (tracked from user messages in memory)
+      // 3. firstMessageAgent (original agent from first message file)
+      // 4. prevMessage?.agent (fallback to nearest message)
+      const sessionAgent = getSessionAgent(ctx.sessionID)
+      const firstMessageAgent = messageDir ? findFirstMessageWithAgent(messageDir) : null
+      const parentAgent = ctx.agent ?? sessionAgent ?? firstMessageAgent ?? prevMessage?.agent
       const parentModel = prevMessage?.model?.providerID && prevMessage?.model?.modelID
         ? { providerID: prevMessage.model.providerID, modelID: prevMessage.model.modelID }
         : undefined
+
+      log("[sisyphus_task] parentAgent resolution", {
+        sessionID: ctx.sessionID,
+        ctxAgent: ctx.agent,
+        sessionAgent,
+        firstMessageAgent,
+        prevMessageAgent: prevMessage?.agent,
+        resolved: parentAgent,
+      })
 
       if (args.resume) {
         if (runInBackground) {

@@ -4,7 +4,9 @@ import { join } from "node:path"
 import type { BackgroundManager, BackgroundTask } from "../../features/background-agent"
 import type { BackgroundTaskArgs, BackgroundOutputArgs, BackgroundCancelArgs } from "./types"
 import { BACKGROUND_TASK_DESCRIPTION, BACKGROUND_OUTPUT_DESCRIPTION, BACKGROUND_CANCEL_DESCRIPTION } from "./constants"
-import { findNearestMessageWithFields, MESSAGE_STORAGE } from "../../features/hook-message-injector"
+import { findNearestMessageWithFields, findFirstMessageWithAgent, MESSAGE_STORAGE } from "../../features/hook-message-injector"
+import { getSessionAgent } from "../../features/claude-code-session-state"
+import { log } from "../../shared/logger"
 
 type OpencodeClient = PluginInput["client"]
 
@@ -67,6 +69,24 @@ export function createBackgroundTask(manager: BackgroundManager): ToolDefinition
           ? { providerID: prevMessage.model.providerID, modelID: prevMessage.model.modelID }
           : undefined
 
+        // Resolve parentAgent with priority chain:
+        // 1. ctx.agent (current agent from tool context)
+        // 2. sessionAgent (tracked from user messages in memory)
+        // 3. firstMessageAgent (original agent from first message file)
+        // 4. prevMessage?.agent (fallback to nearest message)
+        const sessionAgent = getSessionAgent(ctx.sessionID)
+        const firstMessageAgent = messageDir ? findFirstMessageWithAgent(messageDir) : null
+        const parentAgent = ctx.agent ?? sessionAgent ?? firstMessageAgent ?? prevMessage?.agent
+
+        log("[background-task] parentAgent resolution", {
+          sessionID: ctx.sessionID,
+          ctxAgent: ctx.agent,
+          sessionAgent,
+          firstMessageAgent,
+          prevMessageAgent: prevMessage?.agent,
+          resolved: parentAgent,
+        })
+
         const task = await manager.launch({
           description: args.description,
           prompt: args.prompt,
@@ -74,7 +94,7 @@ export function createBackgroundTask(manager: BackgroundManager): ToolDefinition
           parentSessionID: ctx.sessionID,
           parentMessageID: ctx.messageID,
           parentModel,
-          parentAgent: ctx.agent ?? prevMessage?.agent,
+          parentAgent,
         })
 
         ctx.metadata?.({

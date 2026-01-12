@@ -49,6 +49,8 @@ import { getSystemMcpServerNames } from "./features/claude-code-mcp-loader";
 import {
   setMainSession,
   getMainSessionID,
+  setSessionAgent,
+  clearSessionAgent,
 } from "./features/claude-code-session-state";
 import {
   builtinTools,
@@ -473,6 +475,9 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       const { event } = input;
       const props = event.properties as Record<string, unknown> | undefined;
 
+      // Forward events to BackgroundManager for task completion detection
+      backgroundManager.handleEvent(event as Parameters<typeof backgroundManager.handleEvent>[0]);
+
       if (event.type === "session.created") {
         const sessionInfo = props?.info as
           | { id?: string; title?: string; parentID?: string }
@@ -488,8 +493,19 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
           setMainSession(undefined);
         }
         if (sessionInfo?.id) {
+          clearSessionAgent(sessionInfo.id);
           await skillMcpManager.disconnectSession(sessionInfo.id);
           await lspManager.cleanupTempDirectoryClients();
+        }
+      }
+
+      if (event.type === "message.updated") {
+        const info = props?.info as Record<string, unknown> | undefined;
+        const sessionID = info?.sessionID as string | undefined;
+        const agent = info?.agent as string | undefined;
+        const role = info?.role as string | undefined;
+        if (sessionID && agent && role === "user") {
+          setSessionAgent(sessionID, agent);
         }
       }
 

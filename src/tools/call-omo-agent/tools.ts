@@ -1,7 +1,11 @@
 import { tool, type PluginInput, type ToolDefinition } from "@opencode-ai/plugin"
+import { existsSync, readdirSync } from "node:fs"
+import { join } from "node:path"
 import { ALLOWED_AGENTS, CALL_OMO_AGENT_DESCRIPTION } from "./constants"
 import type { CallOmoAgentArgs } from "./types"
 import type { BackgroundManager } from "../../features/background-agent"
+import { findNearestMessageWithFields, findFirstMessageWithAgent, MESSAGE_STORAGE } from "../../features/hook-message-injector"
+import { getSessionAgent } from "../../features/claude-code-session-state"
 import { log } from "../../shared/logger"
 
 type ToolContextWithMetadata = {
@@ -10,6 +14,20 @@ type ToolContextWithMetadata = {
   agent: string
   abort: AbortSignal
   metadata?: (input: { title?: string; metadata?: Record<string, unknown> }) => void
+}
+
+function getMessageDir(sessionID: string): string | null {
+  if (!existsSync(MESSAGE_STORAGE)) return null
+
+  const directPath = join(MESSAGE_STORAGE, sessionID)
+  if (existsSync(directPath)) return directPath
+
+  for (const dir of readdirSync(MESSAGE_STORAGE)) {
+    const sessionPath = join(MESSAGE_STORAGE, dir, sessionID)
+    if (existsSync(sessionPath)) return sessionPath
+  }
+
+  return null
 }
 
 export function createCallOmoAgent(
@@ -60,14 +78,33 @@ async function executeBackground(
   manager: BackgroundManager
 ): Promise<string> {
   try {
+    // Resolve parentAgent with priority chain:
+    // 1. toolContext.agent (current agent from tool context)
+    // 2. sessionAgent (tracked from user messages in memory)
+    // 3. firstMessageAgent (original agent from first message file)
+    // 4. prevMessage?.agent (fallback to nearest message)
+    const messageDir = getMessageDir(toolContext.sessionID)
+    const prevMessage = messageDir ? findNearestMessageWithFields(messageDir) : null
+    const sessionAgent = getSessionAgent(toolContext.sessionID)
+    const firstMessageAgent = messageDir ? findFirstMessageWithAgent(messageDir) : null
+    const parentAgent = toolContext.agent ?? sessionAgent ?? firstMessageAgent ?? prevMessage?.agent
+
+    log("[call_omo_agent] parentAgent resolution", {
+      sessionID: toolContext.sessionID,
+      ctxAgent: toolContext.agent,
+      sessionAgent,
+      firstMessageAgent,
+      prevMessageAgent: prevMessage?.agent,
+      resolved: parentAgent,
+    })
+
     const task = await manager.launch({
       description: args.description,
       prompt: args.prompt,
       agent: args.subagent_type,
       parentSessionID: toolContext.sessionID,
       parentMessageID: toolContext.messageID,
-      // Preserve parent agent context so notifications return to correct agent
-      parentAgent: toolContext.agent,
+      parentAgent,
     })
 
     toolContext.metadata?.({

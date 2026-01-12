@@ -381,35 +381,48 @@ export class BackgroundManager {
       const task = this.findBySession(sessionID)
       if (!task || task.status !== "running") return
 
-      // Edge guard: Require minimum elapsed time (5 seconds) before accepting idle
+      // Edge guard: Require minimum elapsed time (10 seconds) before accepting idle
       const elapsedMs = Date.now() - task.startedAt.getTime()
-      const MIN_IDLE_TIME_MS = 5000
-      if (elapsedMs < MIN_IDLE_TIME_MS) {
-        log("[background-agent] Ignoring early session.idle, elapsed:", { elapsedMs, taskId: task.id })
-        return
-      }
+      const MIN_IDLE_TIME_MS = 10000
+      if (elapsedMs < MIN_IDLE_TIME_MS) return
 
-      // Edge guard: Verify session has actual assistant output before completing
-      this.validateSessionHasOutput(sessionID).then(async (hasValidOutput) => {
-        if (!hasValidOutput) {
-          log("[background-agent] Session.idle but no valid output yet, waiting:", task.id)
+      // Apply stability detection: don't complete immediately, wait for consistent state
+      this.client.session.messages({ path: { id: sessionID } }).then(async (messagesResult) => {
+        if (messagesResult.error) return
+
+        const messages = messagesResult.data ?? []
+        const currentMsgCount = messages.length
+
+        // Track idle events and message stability
+        if (task.lastMsgCount === currentMsgCount) {
+          task.idleEventCount = (task.idleEventCount ?? 0) + 1
+        } else {
+          // Message count changed - reset idle counter
+          task.idleEventCount = 1
+          task.lastMsgCount = currentMsgCount
           return
         }
+
+        // Require 2 consecutive idle events with same message count
+        const REQUIRED_IDLE_EVENTS = 2
+        if (task.idleEventCount < REQUIRED_IDLE_EVENTS) return
+
+        // Edge guard: Verify session has actual assistant output before completing
+        const hasValidOutput = await this.validateSessionHasOutput(sessionID)
+        if (!hasValidOutput) return
 
         const hasIncompleteTodos = await this.checkSessionTodos(sessionID)
-        if (hasIncompleteTodos) {
-          log("[background-agent] Task has incomplete todos, waiting for todo-continuation:", task.id)
-          return
-        }
+        if (hasIncompleteTodos) return
+
+        // Double-check task is still running (may have changed during async operations)
+        if (task.status !== "running") return
 
         task.status = "completed"
         task.completedAt = new Date()
         this.markForNotification(task)
         await this.notifyParentSession(task)
         log("[background-agent] Task completed via session.idle event:", task.id)
-      }).catch(err => {
-        log("[background-agent] Error in session.idle handler:", err)
-      })
+      }).catch(() => {})
     }
 
     if (event.type === "session.deleted") {
@@ -720,7 +733,7 @@ Use \`background_output(task_id="${task.id}")\` to retrieve this result when rea
 
 try {
         const sessionStatus = allStatuses[task.sessionID]
-        
+
         // Don't skip if session not in status - fall through to message-based detection
         if (sessionStatus?.type === "idle") {
           // Edge guard: Validate session has actual output before completing
@@ -740,7 +753,17 @@ try {
           task.completedAt = new Date()
           this.markForNotification(task)
           await this.notifyParentSession(task)
-          log("[background-agent] Task completed via polling:", task.id)
+          log("[background-agent] Task completed via polling (session idle):", task.id)
+          continue
+        }
+
+        // Session is NOT idle - it's still running or status unknown
+        // Only use stability detection if session status is explicitly NOT in the status map
+        // If session is in the status map but not "idle", it means it's still processing
+        if (sessionStatus && sessionStatus.type !== "idle") {
+          // Reset stability counters since session is actively processing
+          task.stablePolls = 0
+          task.lastMsgCount = undefined
           continue
         }
 
@@ -786,6 +809,7 @@ if (lastMessage) {
           }
 
           // Stability detection: complete when message count unchanged for 3 polls
+          // This is a fallback when session status is not available
           const currentMsgCount = messages.length
           const elapsedMs = Date.now() - task.startedAt.getTime()
 
