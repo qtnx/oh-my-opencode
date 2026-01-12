@@ -212,7 +212,8 @@ export function createTodoContinuationEnforcer(
       await ctx.client.session.prompt({
         path: { id: sessionID },
         body: {
-          agent: prevMessage?.agent,
+          // Only include agent field if defined (undefined would cause agent switch)
+          ...(prevMessage?.agent !== undefined ? { agent: prevMessage.agent } : {}),
           parts: [{ type: "text", text: prompt }],
         },
         query: { directory: ctx.directory },
