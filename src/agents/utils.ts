@@ -111,7 +111,7 @@ export function createEnvContext(): string {
 </omo-env>`
 }
 
-function mergeAgentConfig(
+export function mergeAgentConfig(
   base: AgentConfig,
   override: AgentOverrideConfig
 ): AgentConfig {
@@ -125,13 +125,18 @@ function mergeAgentConfig(
   return merged
 }
 
+export interface CreateBuiltinAgentsResult {
+  agents: Record<string, AgentConfig>
+  availableAgents: AvailableAgent[]
+}
+
 export function createBuiltinAgents(
   disabledAgents: BuiltinAgentName[] = [],
   agentOverrides: AgentOverrides = {},
   directory?: string,
   systemDefaultModel?: string,
-  categories?: CategoriesConfig
-): Record<string, AgentConfig> {
+  categories?: CategoriesConfig,
+): CreateBuiltinAgentsResult {
   const result: Record<string, AgentConfig> = {}
   const availableAgents: AvailableAgent[] = []
 
@@ -190,20 +195,9 @@ export function createBuiltinAgents(
     result["Sisyphus"] = sisyphusConfig
   }
 
-  if (!disabledAgents.includes("orchestrator-sisyphus")) {
-    const orchestratorOverride = agentOverrides["orchestrator-sisyphus"]
-    const orchestratorModel = orchestratorOverride?.model
-    let orchestratorConfig = createOrchestratorSisyphusAgent({
-      model: orchestratorModel,
-      availableAgents,
-    })
+  // NOTE: orchestrator-sisyphus is created in config-handler.ts
+  // after ALL agents (builtin + opencode + plugin) are loaded,
+  // so it has access to the complete availableAgents list
 
-    if (orchestratorOverride) {
-      orchestratorConfig = mergeAgentConfig(orchestratorConfig, orchestratorOverride)
-    }
-
-    result["orchestrator-sisyphus"] = orchestratorConfig
-  }
-
-  return result
+  return { agents: result, availableAgents }
 }

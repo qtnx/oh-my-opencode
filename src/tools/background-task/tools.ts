@@ -63,26 +63,42 @@ export function createBackgroundTask(manager: BackgroundManager): ToolDefinition
       }
 
       try {
-        const messageDir = getMessageDir(ctx.sessionID)
-        const prevMessage = messageDir ? findNearestMessageWithFields(messageDir) : null
-        const firstMessageAgent = messageDir ? findFirstMessageWithAgent(messageDir) : null
-        const sessionAgent = getSessionAgent(ctx.sessionID)
-        const parentAgent = ctx.agent ?? sessionAgent ?? firstMessageAgent ?? prevMessage?.agent
-        
-        log("[background_task] parentAgent resolution", {
+        const messageDir = getMessageDir(ctx.sessionID);
+        const prevMessage = messageDir
+          ? findNearestMessageWithFields(messageDir)
+          : null;
+
+        // Resolve parentAgent with priority chain:
+        // 1. ctx.agent (current agent from tool context)
+        // 2. sessionAgent (tracked from user messages in memory)
+        // 3. firstMessageAgent (original agent from first message file)
+        // 4. prevMessage?.agent (fallback to nearest message)
+        const sessionAgent = getSessionAgent(ctx.sessionID);
+        const firstMessageAgent = messageDir
+          ? findFirstMessageWithAgent(messageDir)
+          : null;
+        const parentAgent =
+          ctx.agent ?? sessionAgent ?? firstMessageAgent ?? prevMessage?.agent;
+
+        log("[background-task] parentAgent resolution", {
           sessionID: ctx.sessionID,
           ctxAgent: ctx.agent,
           sessionAgent,
           firstMessageAgent,
           prevMessageAgent: prevMessage?.agent,
-          resolvedParentAgent: parentAgent,
-        })
-        
-        const parentModel = prevMessage?.model?.providerID && prevMessage?.model?.modelID
-          ? { providerID: prevMessage.model.providerID, modelID: prevMessage.model.modelID }
-          : undefined
+          resolved: parentAgent,
+        });
+
+        const parentModel =
+          prevMessage?.model?.providerID && prevMessage?.model?.modelID
+            ? {
+                providerID: prevMessage.model.providerID,
+                modelID: prevMessage.model.modelID,
+              }
+            : undefined;
 
         const task = await manager.launch({
+
           description: args.description,
           prompt: args.prompt,
           agent: args.agent.trim(),

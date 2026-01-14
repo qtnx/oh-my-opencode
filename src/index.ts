@@ -78,6 +78,8 @@ import { createModelCacheState, getModelLimit } from "./plugin-state";
 import { createConfigHandler } from "./plugin-handlers";
 
 const OhMyOpenCodePlugin: Plugin = async (ctx) => {
+  log("[perf] Plugin loaded - perf timing enabled v2");
+
   // Start background tmux check immediately
   startTmuxCheck();
 
@@ -403,25 +405,86 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     config: configHandler,
 
     event: async (input) => {
+      const eventStart = Date.now();
+      const timings: Record<string, number> = {};
+
+      let start = Date.now();
       await autoUpdateChecker?.event(input);
+      timings.autoUpdateChecker = Date.now() - start;
+
+      start = Date.now();
       await claudeCodeHooks.event(input);
+      timings.claudeCodeHooks = Date.now() - start;
+
+      start = Date.now();
       await backgroundNotificationHook?.event(input);
+      timings.backgroundNotification = Date.now() - start;
+
+      start = Date.now();
       await sessionNotification?.(input);
+      timings.sessionNotification = Date.now() - start;
+
+      start = Date.now();
       await todoContinuationEnforcer?.handler(input);
+      timings.todoContinuation = Date.now() - start;
+
+      start = Date.now();
       await contextWindowMonitor?.event(input);
+      timings.contextWindowMonitor = Date.now() - start;
+
+      start = Date.now();
       await directoryAgentsInjector?.event(input);
+      timings.directoryAgentsInjector = Date.now() - start;
+
+      start = Date.now();
       await directoryReadmeInjector?.event(input);
+      timings.directoryReadmeInjector = Date.now() - start;
+
+      start = Date.now();
       await rulesInjector?.event(input);
+      timings.rulesInjector = Date.now() - start;
+
+      start = Date.now();
       await thinkMode?.event(input);
+      timings.thinkMode = Date.now() - start;
+
+      start = Date.now();
       await anthropicContextWindowLimitRecovery?.event(input);
+      timings.anthropicRecovery = Date.now() - start;
+
+      start = Date.now();
       await preemptiveCompaction?.event(input);
+      timings.preemptiveCompaction = Date.now() - start;
+
+      start = Date.now();
       await agentUsageReminder?.event(input);
+      timings.agentUsageReminder = Date.now() - start;
+
+      start = Date.now();
       await interactiveBashSession?.event(input);
+      timings.interactiveBash = Date.now() - start;
+
+      start = Date.now();
       await ralphLoop?.event(input);
+      timings.ralphLoop = Date.now() - start;
+
+      start = Date.now();
       await sisyphusOrchestrator?.handler(input);
+      timings.sisyphusOrchestrator = Date.now() - start;
+
+      const totalTime = Date.now() - eventStart;
+      const slowHooks = Object.entries(timings)
+        .filter(([_, time]) => time > 5)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, time]) => `${name}=${time}ms`)
+        .join(", ");
+      log(`[perf] event(${input.event.type}) ${totalTime}ms ${slowHooks ? `| ${slowHooks}` : ""}`)
 
       const { event } = input;
       const props = event.properties as Record<string, unknown> | undefined;
+
+      // Forward events to BackgroundManager for task completion detection
+      backgroundManager.handleEvent(event as Parameters<typeof backgroundManager.handleEvent>[0]);
 
       if (event.type === "session.created") {
         const sessionInfo = props?.info as
@@ -484,13 +547,48 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     },
 
     "tool.execute.before": async (input, output) => {
+      const toolBeforeStart = Date.now();
+      const timings: Record<string, number> = {};
+
+      let start = Date.now();
       await claudeCodeHooks["tool.execute.before"](input, output);
+      timings.claudeCodeHooks = Date.now() - start;
+
+      start = Date.now();
       await nonInteractiveEnv?.["tool.execute.before"](input, output);
+      timings.nonInteractiveEnv = Date.now() - start;
+
+      start = Date.now();
       await commentChecker?.["tool.execute.before"](input, output);
+      timings.commentChecker = Date.now() - start;
+
+      start = Date.now();
       await directoryAgentsInjector?.["tool.execute.before"]?.(input, output);
+      timings.directoryAgentsInjector = Date.now() - start;
+
+      start = Date.now();
       await directoryReadmeInjector?.["tool.execute.before"]?.(input, output);
+      timings.directoryReadmeInjector = Date.now() - start;
+
+      start = Date.now();
       await rulesInjector?.["tool.execute.before"]?.(input, output);
+      timings.rulesInjector = Date.now() - start;
+
+      start = Date.now();
       await prometheusMdOnly?.["tool.execute.before"]?.(input, output);
+      timings.prometheusMdOnly = Date.now() - start;
+
+      start = Date.now();
+      await sisyphusOrchestrator?.["tool.execute.before"]?.(input, output);
+      timings.sisyphusOrchestrator = Date.now() - start;
+
+      const totalTime = Date.now() - toolBeforeStart;
+      const slowHooks = Object.entries(timings)
+        .filter(([_, time]) => time > 5)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, time]) => `${name}=${time}ms`)
+        .join(", ");
+      log(`[perf] before(${input.tool}) ${totalTime}ms ${slowHooks ? `| ${slowHooks}` : ""}`)
 
       if (input.tool === "task") {
         const args = output.args as Record<string, unknown>;
@@ -538,19 +636,68 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     },
 
     "tool.execute.after": async (input, output) => {
+      const toolAfterStart = Date.now();
+      const timings: Record<string, number> = {};
+
+      let start = Date.now();
       await claudeCodeHooks["tool.execute.after"](input, output);
+      timings.claudeCodeHooks = Date.now() - start;
+
+      start = Date.now();
       await toolOutputTruncator?.["tool.execute.after"](input, output);
+      timings.toolOutputTruncator = Date.now() - start;
+
+      start = Date.now();
       await contextWindowMonitor?.["tool.execute.after"](input, output);
+      timings.contextWindowMonitor = Date.now() - start;
+
+      start = Date.now();
       await commentChecker?.["tool.execute.after"](input, output);
+      timings.commentChecker = Date.now() - start;
+
+      start = Date.now();
       await directoryAgentsInjector?.["tool.execute.after"](input, output);
+      timings.directoryAgentsInjector = Date.now() - start;
+
+      start = Date.now();
       await directoryReadmeInjector?.["tool.execute.after"](input, output);
+      timings.directoryReadmeInjector = Date.now() - start;
+
+      start = Date.now();
       await rulesInjector?.["tool.execute.after"](input, output);
+      timings.rulesInjector = Date.now() - start;
+
+      start = Date.now();
       await emptyTaskResponseDetector?.["tool.execute.after"](input, output);
+      timings.emptyTaskResponseDetector = Date.now() - start;
+
+      start = Date.now();
       await agentUsageReminder?.["tool.execute.after"](input, output);
+      timings.agentUsageReminder = Date.now() - start;
+
+      start = Date.now();
       await interactiveBashSession?.["tool.execute.after"](input, output);
+      timings.interactiveBash = Date.now() - start;
+
+      start = Date.now();
       await editErrorRecovery?.["tool.execute.after"](input, output);
+      timings.editErrorRecovery = Date.now() - start;
+
+      start = Date.now();
       await sisyphusOrchestrator?.["tool.execute.after"]?.(input, output);
+      timings.sisyphusOrchestrator = Date.now() - start;
+
+      start = Date.now();
       await taskResumeInfo["tool.execute.after"](input, output);
+      timings.taskResumeInfo = Date.now() - start;
+
+      const totalTime = Date.now() - toolAfterStart;
+      const slowHooks = Object.entries(timings)
+        .filter(([_, time]) => time > 5)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, time]) => `${name}=${time}ms`)
+        .join(", ");
+      log(`[perf] after(${input.tool}) ${totalTime}ms ${slowHooks ? `| ${slowHooks}` : ""}`)
     },
   };
 };

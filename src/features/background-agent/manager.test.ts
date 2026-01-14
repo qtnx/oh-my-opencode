@@ -813,3 +813,189 @@ function buildNotificationPromptBody(
 
   return body
 }
+
+/**
+ * Tests for handleEvent - specifically testing session.idle behavior
+ * to reproduce the bug where background tasks report complete before finishing
+ */
+describe("BackgroundManager.handleEvent - session.idle", () => {
+  /**
+   * MockBackgroundManagerWithEvents extends the mock to include handleEvent logic
+   */
+  class MockBackgroundManagerWithEvents extends MockBackgroundManager {
+    public validateSessionHasOutputResult = true
+    public checkSessionTodosResult = false
+    public completedTasks: string[] = []
+    private MIN_IDLE_TIME_MS = 5000
+
+    async handleEvent(event: { type: string; properties?: Record<string, unknown> }): Promise<void> {
+      const props = event.properties
+
+      if (event.type === "session.idle") {
+        const sessionID = props?.sessionID as string | undefined
+        if (!sessionID) return
+
+        const task = this.findBySession(sessionID)
+        if (!task || task.status !== "running") return
+
+        // Edge guard: Require minimum elapsed time before accepting idle
+        const elapsedMs = Date.now() - task.startedAt.getTime()
+        if (elapsedMs < this.MIN_IDLE_TIME_MS) {
+          return
+        }
+
+        // Simulate async validation
+        const hasValidOutput = this.validateSessionHasOutputResult
+        if (!hasValidOutput) {
+          return
+        }
+
+        const hasIncompleteTodos = this.checkSessionTodosResult
+        if (hasIncompleteTodos) {
+          return
+        }
+
+        // Mark complete
+        task.status = "completed"
+        task.completedAt = new Date()
+        this.completedTasks.push(task.id)
+        this.markForNotification(task)
+      }
+    }
+
+    setMinIdleTime(ms: number): void {
+      this.MIN_IDLE_TIME_MS = ms
+    }
+  }
+
+  test("should NOT complete task when session.idle fires before MIN_IDLE_TIME", async () => {
+    // #given - task just started
+    const manager = new MockBackgroundManagerWithEvents()
+    manager.setMinIdleTime(5000) // 5 seconds minimum
+
+    const task = createMockTask({
+      id: "task-early",
+      sessionID: "session-early",
+      parentSessionID: "session-parent",
+      startedAt: new Date(), // Just started
+    })
+    manager.addTask(task)
+
+    // #when - session.idle fires immediately (before 5s)
+    await manager.handleEvent({
+      type: "session.idle",
+      properties: { sessionID: "session-early" },
+    })
+
+    // #then - task should NOT be completed
+    expect(task.status).toBe("running")
+    expect(manager.completedTasks).not.toContain("task-early")
+  })
+
+  test("should complete task when session.idle fires after MIN_IDLE_TIME with valid output", async () => {
+    // #given - task started 10 seconds ago
+    const manager = new MockBackgroundManagerWithEvents()
+    manager.setMinIdleTime(5000)
+    manager.validateSessionHasOutputResult = true
+    manager.checkSessionTodosResult = false
+
+    const task = createMockTask({
+      id: "task-ready",
+      sessionID: "session-ready",
+      parentSessionID: "session-parent",
+      startedAt: new Date(Date.now() - 10000), // Started 10s ago
+    })
+    manager.addTask(task)
+
+    // #when - session.idle fires after task has run for a while
+    await manager.handleEvent({
+      type: "session.idle",
+      properties: { sessionID: "session-ready" },
+    })
+
+    // #then - task should be completed
+    expect(task.status).toBe("completed")
+    expect(manager.completedTasks).toContain("task-ready")
+  })
+
+  test("should NOT complete task when validateSessionHasOutput returns false", async () => {
+    // #given - task running but no output yet
+    const manager = new MockBackgroundManagerWithEvents()
+    manager.setMinIdleTime(5000)
+    manager.validateSessionHasOutputResult = false // No output yet
+
+    const task = createMockTask({
+      id: "task-no-output",
+      sessionID: "session-no-output",
+      parentSessionID: "session-parent",
+      startedAt: new Date(Date.now() - 10000), // Started 10s ago
+    })
+    manager.addTask(task)
+
+    // #when - session.idle fires but no output
+    await manager.handleEvent({
+      type: "session.idle",
+      properties: { sessionID: "session-no-output" },
+    })
+
+    // #then - task should NOT be completed
+    expect(task.status).toBe("running")
+    expect(manager.completedTasks).not.toContain("task-no-output")
+  })
+
+  test("should NOT complete task when there are incomplete todos", async () => {
+    // #given - task has incomplete todos
+    const manager = new MockBackgroundManagerWithEvents()
+    manager.setMinIdleTime(5000)
+    manager.validateSessionHasOutputResult = true
+    manager.checkSessionTodosResult = true // Has incomplete todos
+
+    const task = createMockTask({
+      id: "task-with-todos",
+      sessionID: "session-todos",
+      parentSessionID: "session-parent",
+      startedAt: new Date(Date.now() - 10000),
+    })
+    manager.addTask(task)
+
+    // #when - session.idle fires but todos incomplete
+    await manager.handleEvent({
+      type: "session.idle",
+      properties: { sessionID: "session-todos" },
+    })
+
+    // #then - task should NOT be completed
+    expect(task.status).toBe("running")
+    expect(manager.completedTasks).not.toContain("task-with-todos")
+  })
+
+  test("BUG REPRODUCTION: task completes too early when session.idle fires multiple times", async () => {
+    // This test demonstrates the potential bug scenario:
+    // OpenCode may send multiple session.idle events, and if the first one
+    // passes all checks (even with minimal output), the task is marked complete
+
+    // #given - task just started but has some minimal output already
+    const manager = new MockBackgroundManagerWithEvents()
+    manager.setMinIdleTime(100) // Very short for testing
+    manager.validateSessionHasOutputResult = true // Minimal output exists
+
+    const task = createMockTask({
+      id: "task-premature",
+      sessionID: "session-premature",
+      parentSessionID: "session-parent",
+      startedAt: new Date(Date.now() - 200), // Started 200ms ago (passes 100ms check)
+    })
+    manager.addTask(task)
+
+    // #when - first session.idle fires very early
+    await manager.handleEvent({
+      type: "session.idle",
+      properties: { sessionID: "session-premature" },
+    })
+
+    // #then - task is incorrectly marked as completed (BUG)
+    // In real scenario, the task may still be processing
+    expect(task.status).toBe("completed") // This demonstrates the bug
+    expect(manager.completedTasks).toContain("task-premature")
+  })
+})

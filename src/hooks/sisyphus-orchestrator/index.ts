@@ -1,6 +1,6 @@
 import type { PluginInput } from "@opencode-ai/plugin"
 import { execSync } from "node:child_process"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
   readBoulderState,
@@ -106,7 +106,7 @@ You (orchestrator-sisyphus) are attempting to directly modify a file outside \`.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🚫 **THIS IS FORBIDDEN** (except for VERIFICATION purposes)
+🚫 **THIS IS FORBIDDEN** (except for quick verification fixes)
 
 As an ORCHESTRATOR, you MUST:
 1. **DELEGATE** all implementation work via \`sisyphus_task\`
@@ -125,11 +125,16 @@ As an ORCHESTRATOR, you MUST:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**IF THIS IS FOR VERIFICATION:**
-Proceed if you are verifying subagent work by making a small fix.
-But for any substantial changes, USE \`sisyphus_task\`.
+**BYPASS FOR QUICK FIXES:**
+If you need to make a SMALL, quick fix (e.g., fixing a typo, one-line change):
+1. Send a message containing \`<bypass>\` tag first
+2. Explain why direct edit is appropriate
+3. Then proceed with the edit
 
-**CORRECT APPROACH:**
+Example bypass message:
+"<bypass>Quick fix: typo in error message, single line change</bypass>"
+
+**CORRECT APPROACH FOR SUBSTANTIAL CHANGES:**
 \`\`\`
 sisyphus_task(
   category="...",
@@ -137,7 +142,27 @@ sisyphus_task(
 )
 \`\`\`
 
-⚠️⚠️⚠️ DELEGATE. DON'T IMPLEMENT. ⚠️⚠️⚠️
+⚠️⚠️⚠️ DELEGATE OR BYPASS WITH <bypass> TAG. ⚠️⚠️⚠️
+
+---
+`
+
+const ORCHESTRATOR_EDIT_BYPASSED = `
+
+---
+
+[BYPASS ACKNOWLEDGED - DIRECT EDIT ALLOWED]
+
+You have bypassed the delegation requirement for this edit.
+
+**Path:** $FILE_PATH
+
+✅ Proceeding with direct edit. This should only be used for:
+- Typo fixes
+- One-line changes
+- Quick verification corrections
+
+For substantial changes, use \`sisyphus_task\` next time.
 
 ---
 `
@@ -343,6 +368,55 @@ function isCallerOrchestrator(sessionID?: string): boolean {
   if (!messageDir) return false
   const nearest = findNearestMessageWithFields(messageDir)
   return nearest?.agent === "orchestrator-sisyphus"
+}
+
+/**
+ * Check if orchestrator rules should be enforced for this session.
+ * Uses multiple checks:
+ * 1. Direct message storage check (if agent = orchestrator-sisyphus)
+ * 2. Fallback: if session is part of an active boulder (orchestration mode)
+ */
+function shouldEnforceOrchestratorRules(sessionID?: string, directory?: string): boolean {
+  // Direct check from message storage
+  if (isCallerOrchestrator(sessionID)) return true
+
+  // Fallback: check if this session is part of an active boulder
+  if (sessionID && directory) {
+    const boulderState = readBoulderState(directory)
+    if (boulderState?.session_ids.includes(sessionID)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * Check if recent messages contain a <bypass> tag
+ * Looks at the last 5 message files in the session's message directory
+ */
+function hasRecentBypassTag(sessionID?: string): boolean {
+  if (!sessionID) return false
+  const messageDir = getMessageDir(sessionID)
+  if (!messageDir) return false
+
+  try {
+    const files = readdirSync(messageDir)
+      .filter(f => f.endsWith(".json"))
+      .sort((a, b) => b.localeCompare(a)) // newest first
+      .slice(0, 5) // check last 5 messages
+
+    for (const file of files) {
+      const content = readFileSync(join(messageDir, file), "utf-8")
+      if (content.includes("<bypass>") || content.includes("<bypass/>")) {
+        return true
+      }
+    }
+  } catch {
+    return false
+  }
+
+  return false
 }
 
 interface SessionState {
@@ -558,11 +632,12 @@ export function createSisyphusOrchestratorHook(
       input: { tool: string; sessionID?: string; callID?: string },
       output: { args: Record<string, unknown>; message?: string }
     ): Promise<void> => {
-      if (!isCallerOrchestrator(input.sessionID)) {
+      // Use enhanced check that also falls back to boulder state
+      if (!shouldEnforceOrchestratorRules(input.sessionID, ctx.directory)) {
         return
       }
 
-      // Check Write/Edit tools for orchestrator - inject strong warning
+      // Check Write/Edit tools for orchestrator - inject warning or allow with bypass
       if (WRITE_EDIT_TOOLS.includes(input.tool)) {
         const filePath = (output.args.filePath ?? output.args.path ?? output.args.file) as string | undefined
         if (filePath && !isSisyphusPath(filePath)) {
@@ -570,13 +645,29 @@ export function createSisyphusOrchestratorHook(
           if (input.callID) {
             pendingFilePaths.set(input.callID, filePath)
           }
-          const warning = ORCHESTRATOR_DELEGATION_REQUIRED.replace("$FILE_PATH", filePath)
-          output.message = (output.message || "") + warning
-          log(`[${HOOK_NAME}] Injected delegation warning for direct file modification`, {
-            sessionID: input.sessionID,
-            tool: input.tool,
-            filePath,
-          })
+
+          // Check if bypass tag was used in recent messages
+          const hasBypass = hasRecentBypassTag(input.sessionID)
+
+          if (hasBypass) {
+            // Bypass acknowledged - allow with soft reminder
+            const bypassMsg = ORCHESTRATOR_EDIT_BYPASSED.replace("$FILE_PATH", filePath)
+            output.message = (output.message || "") + bypassMsg
+            log(`[${HOOK_NAME}] Edit bypassed with <bypass> tag`, {
+              sessionID: input.sessionID,
+              tool: input.tool,
+              filePath,
+            })
+          } else {
+            // No bypass - inject strong warning
+            const warning = ORCHESTRATOR_DELEGATION_REQUIRED.replace("$FILE_PATH", filePath)
+            output.message = (output.message || "") + warning
+            log(`[${HOOK_NAME}] Injected delegation warning for direct file modification`, {
+              sessionID: input.sessionID,
+              tool: input.tool,
+              filePath,
+            })
+          }
         }
         return
       }
@@ -597,7 +688,8 @@ export function createSisyphusOrchestratorHook(
       input: ToolExecuteAfterInput,
       output: ToolExecuteAfterOutput
     ): Promise<void> => {
-      if (!isCallerOrchestrator(input.sessionID)) {
+      // Use enhanced check that also falls back to boulder state
+      if (!shouldEnforceOrchestratorRules(input.sessionID, ctx.directory)) {
         return
       }
 

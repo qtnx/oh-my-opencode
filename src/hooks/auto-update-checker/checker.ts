@@ -1,6 +1,7 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
+import { execSync, spawn } from "node:child_process"
 import type { NpmDistTags, OpencodeConfig, PackageJson, UpdateCheckResult } from "./types"
 import {
   PACKAGE_NAME,
@@ -55,6 +56,7 @@ function getConfigPaths(directory: string): string[] {
 }
 
 export function getLocalDevPath(directory: string): string | null {
+  // Check for file:// entries in opencode.json
   for (const configPath of getConfigPaths(directory)) {
     try {
       if (!fs.existsSync(configPath)) continue
@@ -69,6 +71,37 @@ export function getLocalDevPath(directory: string): string | null {
           } catch {
             return entry.replace("file://", "")
           }
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+
+  // Check for symlinks in plugin directories
+  const pluginDirs = [
+    path.join(directory, ".opencode", "plugin"),
+    path.join(USER_CONFIG_DIR, "opencode", "plugin"),
+  ]
+
+  for (const pluginDir of pluginDirs) {
+    try {
+      if (!fs.existsSync(pluginDir)) continue
+
+      const files = fs.readdirSync(pluginDir)
+      for (const file of files) {
+        if (!file.includes(PACKAGE_NAME)) continue
+
+        const filePath = path.join(pluginDir, file)
+        const stat = fs.lstatSync(filePath)
+
+        if (stat.isSymbolicLink()) {
+          const target = fs.readlinkSync(filePath)
+          // Resolve to absolute path if relative
+          const absoluteTarget = path.isAbsolute(target)
+            ? target
+            : path.resolve(pluginDir, target)
+          return absoluteTarget
         }
       }
     } catch {
@@ -281,4 +314,147 @@ export async function checkForUpdate(directory: string): Promise<UpdateCheckResu
   const needsUpdate = currentVersion !== latestVersion
   log(`[auto-update-checker] Current: ${currentVersion}, Latest (${channel}): ${latestVersion}, NeedsUpdate: ${needsUpdate}`)
   return { needsUpdate, currentVersion, latestVersion, isLocalDev: false, isPinned: pluginInfo.isPinned }
+}
+
+// ============================================
+// Git-based update for local development mode
+// ============================================
+
+export interface GitUpdateResult {
+  hasUpdates: boolean
+  currentCommit: string | null
+  remoteCommit: string | null
+  error?: string
+}
+
+/**
+ * Get the git repository root from a local dev path
+ */
+export function getGitRepoRoot(localDevPath: string): string | null {
+  try {
+    const stat = fs.statSync(localDevPath)
+    let dir = stat.isDirectory() ? localDevPath : path.dirname(localDevPath)
+
+    for (let i = 0; i < 10; i++) {
+      const gitDir = path.join(dir, ".git")
+      if (fs.existsSync(gitDir)) {
+        return dir
+      }
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  } catch {}
+  return null
+}
+
+/**
+ * Check if there are git updates available for local dev mode
+ */
+export function checkGitUpdates(repoPath: string): GitUpdateResult {
+  try {
+    // Fetch latest from remote (quietly)
+    try {
+      execSync("git fetch origin --quiet", { cwd: repoPath, stdio: "pipe", timeout: 30000 })
+    } catch {
+      // Fetch failed, maybe offline - continue with local check
+      log("[git-update] git fetch failed, continuing with local state")
+    }
+
+    // Get current commit
+    const currentCommit = execSync("git rev-parse HEAD", { cwd: repoPath, encoding: "utf-8" }).trim()
+
+    // Get current branch
+    const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: repoPath, encoding: "utf-8" }).trim()
+
+    // Get remote commit
+    let remoteCommit: string | null = null
+    try {
+      remoteCommit = execSync(`git rev-parse origin/${currentBranch}`, { cwd: repoPath, encoding: "utf-8" }).trim()
+    } catch {
+      // No remote tracking branch
+      return { hasUpdates: false, currentCommit, remoteCommit: null }
+    }
+
+    const hasUpdates = currentCommit !== remoteCommit
+
+    if (hasUpdates) {
+      log(`[git-update] Updates available: ${currentCommit.slice(0, 7)} → ${remoteCommit.slice(0, 7)}`)
+    }
+
+    return { hasUpdates, currentCommit, remoteCommit }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    log("[git-update] Check failed:", error)
+    return { hasUpdates: false, currentCommit: null, remoteCommit: null, error }
+  }
+}
+
+/**
+ * Run git pull and rebuild for local dev mode
+ * Returns true if successful
+ */
+export async function runGitUpdateAndBuild(repoPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    log("[git-update] Starting git pull and rebuild...")
+
+    const commands = [
+      "git pull --ff-only",
+      "bun install",
+      "bun run build"
+    ]
+
+    const runCommand = (index: number) => {
+      if (index >= commands.length) {
+        log("[git-update] Update and rebuild completed successfully")
+        resolve(true)
+        return
+      }
+
+      const cmd = commands[index]
+      const [executable, ...args] = cmd.split(" ")
+
+      log(`[git-update] Running: ${cmd}`)
+
+      const proc = spawn(executable, args, {
+        cwd: repoPath,
+        stdio: "pipe",
+        shell: true
+      })
+
+      let stderr = ""
+      proc.stderr?.on("data", (data) => {
+        stderr += data.toString()
+      })
+
+      proc.on("close", (code) => {
+        if (code !== 0) {
+          log(`[git-update] Command failed: ${cmd}`, stderr)
+          resolve(false)
+          return
+        }
+        runCommand(index + 1)
+      })
+
+      proc.on("error", (err) => {
+        log(`[git-update] Command error: ${cmd}`, err.message)
+        resolve(false)
+      })
+    }
+
+    runCommand(0)
+  })
+}
+
+/**
+ * Get short git info for display
+ */
+export function getGitShortInfo(repoPath: string): { commit: string; branch: string } | null {
+  try {
+    const commit = execSync("git rev-parse --short HEAD", { cwd: repoPath, encoding: "utf-8" }).trim()
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: repoPath, encoding: "utf-8" }).trim()
+    return { commit, branch }
+  } catch {
+    return null
+  }
 }

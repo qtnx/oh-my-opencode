@@ -1,9 +1,12 @@
-import type { AgentConfig } from "@opencode-ai/sdk"
-import type { AgentPromptMetadata } from "./types"
-import type { AvailableAgent, AvailableSkill } from "./sisyphus-prompt-builder"
-import type { CategoryConfig } from "../config/schema"
-import { DEFAULT_CATEGORIES, CATEGORY_DESCRIPTIONS } from "../tools/sisyphus-task/constants"
-import { createAgentToolRestrictions } from "../shared/permission-compat"
+import type { AgentConfig } from "@opencode-ai/sdk";
+import type { AgentPromptMetadata } from "./types";
+import type { AvailableAgent, AvailableSkill } from "./sisyphus-prompt-builder";
+import type { CategoryConfig } from "../config/schema";
+import {
+  DEFAULT_CATEGORIES,
+  CATEGORY_DESCRIPTIONS,
+} from "../tools/sisyphus-task/constants";
+import { createAgentToolRestrictions } from "../shared/permission-compat";
 
 /**
  * Orchestrator Sisyphus - Master Orchestrator Agent
@@ -13,10 +16,10 @@ import { createAgentToolRestrictions } from "../shared/permission-compat"
  */
 
 export interface OrchestratorContext {
-  model?: string
-  availableAgents?: AvailableAgent[]
-  availableSkills?: AvailableSkill[]
-  userCategories?: Record<string, CategoryConfig>
+  model?: string;
+  availableAgents?: AvailableAgent[];
+  availableSkills?: AvailableSkill[];
+  userCategories?: Record<string, CategoryConfig>;
 }
 
 function buildAgentSelectionSection(agents: AvailableAgent[]): string {
@@ -31,13 +34,13 @@ function buildAgentSelectionSection(agents: AvailableAgent[]): string {
 | \`frontend-ui-ux-engineer\` | Visual design, UI implementation |
 | \`document-writer\` | README, API docs, guides |
 | \`git-master\` | Git commits (ALWAYS use for commits) |
-| \`debugging-master\` | Complex debugging sessions |`
+| \`debugging-master\` | Complex debugging sessions |`;
   }
 
   const rows = agents.map((a) => {
-    const shortDesc = a.description.split(".")[0] || a.description
-    return `| \`${a.name}\` | ${shortDesc} |`
-  })
+    const shortDesc = a.description.split(".")[0] || a.description;
+    return `| \`${a.name}\` | ${shortDesc} |`;
+  });
 
   return `##### Option B: Use AGENT directly (for specialized experts)
 
@@ -45,16 +48,18 @@ function buildAgentSelectionSection(agents: AvailableAgent[]): string {
 |-------|----------|
 ${rows.join("\n")}
 | \`git-master\` | Git commits (ALWAYS use for commits) |
-| \`debugging-master\` | Complex debugging sessions |`
+| \`debugging-master\` | Complex debugging sessions |`;
 }
 
-function buildCategorySection(userCategories?: Record<string, CategoryConfig>): string {
-  const allCategories = { ...DEFAULT_CATEGORIES, ...userCategories }
+function buildCategorySection(
+  userCategories?: Record<string, CategoryConfig>,
+): string {
+  const allCategories = { ...DEFAULT_CATEGORIES, ...userCategories };
   const categoryRows = Object.entries(allCategories).map(([name, config]) => {
-    const temp = config.temperature ?? 0.5
-    const bestFor = CATEGORY_DESCRIPTIONS[name] ?? "General tasks"
-    return `| \`${name}\` | ${temp} | ${bestFor} |`
-  })
+    const temp = config.temperature ?? 0.5;
+    const bestFor = CATEGORY_DESCRIPTIONS[name] ?? "General tasks";
+    return `| \`${name}\` | ${temp} | ${bestFor} |`;
+  });
 
   return `##### Option A: Use CATEGORY (for domain-specific work)
 
@@ -67,18 +72,18 @@ ${categoryRows.join("\n")}
 \`\`\`typescript
 sisyphus_task(category="visual-engineering", prompt="...")      // UI/frontend work
 sisyphus_task(category="ultrabrain", prompt="...")     // Backend/strategic work
-\`\`\``
+\`\`\``;
 }
 
 function buildSkillsSection(skills: AvailableSkill[]): string {
   if (skills.length === 0) {
-    return ""
+    return "";
   }
 
   const skillRows = skills.map((s) => {
-    const shortDesc = s.description.split(".")[0] || s.description
-    return `| \`${s.name}\` | ${shortDesc} |`
-  })
+    const shortDesc = s.description.split(".")[0] || s.description;
+    return `| \`${s.name}\` | ${shortDesc} |`;
+  });
 
   return `
 #### 3.2.2: Skill Selection (PREPEND TO PROMPT)
@@ -103,24 +108,34 @@ sisyphus_task(category="visual-engineering", skills=["frontend-ui-ux", "playwrig
 **IMPORTANT:**
 - Skills are OPTIONAL - only include if task clearly benefits from specialized guidance
 - Skills get prepended to the subagent's prompt, providing domain-specific instructions
-- If no appropriate skill exists, omit the \`skills\` parameter entirely`
+- If no appropriate skill exists, omit the \`skills\` parameter entirely`;
 }
 
-function buildDecisionMatrix(agents: AvailableAgent[], userCategories?: Record<string, CategoryConfig>): string {
-  const allCategories = { ...DEFAULT_CATEGORIES, ...userCategories }
-  const hasVisual = "visual-engineering" in allCategories
-  const hasStrategic = "ultrabrain" in allCategories
-  
-  const rows: string[] = []
-  if (hasVisual) rows.push("| Implement frontend feature | `category=\"visual-engineering\"` |")
-  if (hasStrategic) rows.push("| Implement backend feature | `category=\"ultrabrain\"` |")
-  
-  const agentNames = agents.map((a) => a.name)
-  if (agentNames.includes("oracle")) rows.push("| Code review / architecture | `agent=\"oracle\"` |")
-  if (agentNames.includes("explore")) rows.push("| Find code in codebase | `agent=\"explore\"` |")
-  if (agentNames.includes("librarian")) rows.push("| Look up library docs | `agent=\"librarian\"` |")
-  rows.push("| Git commit | `agent=\"git-master\"` |")
-  rows.push("| Debug complex issue | `agent=\"debugging-master\"` |")
+function buildDecisionMatrix(
+  agents: AvailableAgent[],
+  userCategories?: Record<string, CategoryConfig>,
+): string {
+  const allCategories = { ...DEFAULT_CATEGORIES, ...userCategories };
+  const hasVisual = "visual-engineering" in allCategories;
+  const hasStrategic = "ultrabrain" in allCategories;
+
+  const rows: string[] = [];
+  if (hasVisual)
+    rows.push(
+      '| Implement frontend feature | `category="visual-engineering"` |',
+    );
+  if (hasStrategic)
+    rows.push('| Implement backend feature | `category="ultrabrain"` |');
+
+  const agentNames = agents.map((a) => a.name);
+  if (agentNames.includes("oracle"))
+    rows.push('| Code review / architecture | `agent="oracle"` |');
+  if (agentNames.includes("explore"))
+    rows.push('| Find code in codebase | `agent="explore"` |');
+  if (agentNames.includes("librarian"))
+    rows.push('| Look up library docs | `agent="librarian"` |');
+  rows.push('| Git commit | `agent="git-master"` |');
+  rows.push('| Debug complex issue | `agent="debugging-master"` |');
 
   return `##### Decision Matrix
 
@@ -128,7 +143,7 @@ function buildDecisionMatrix(agents: AvailableAgent[], userCategories?: Record<s
 |-----------|-----|
 ${rows.join("\n")}
 
-**NEVER provide both category AND agent - they are mutually exclusive.**`
+**NEVER provide both category AND agent - they are mutually exclusive.**`;
 }
 
 export const ORCHESTRATOR_SISYPHUS_SYSTEM_PROMPT = `
@@ -1056,6 +1071,57 @@ PLAN PATH: .sisyphus/plans/{plan-name}.md (READ ONLY - NEVER MODIFY)
 ### Dependencies from Previous Tasks
 [What was built that this task depends on]
 [Interfaces, types, functions available]
+
+## SCOPE BOUNDARIES (CRITICAL - Define what agent MUST and MUST NOT do)
+
+### This Task Includes:
+- [ ] [Specific deliverable 1]
+- [ ] [Specific deliverable 2]
+- [ ] Unit tests for NEW code only
+
+### This Task EXCLUDES (will be delegated separately):
+- [ ] E2E tests → \`testing-specialist\` or separate task
+- [ ] Integration tests → \`testing-specialist\` or separate task
+- [ ] Documentation updates → \`document-writer\`
+- [ ] Performance optimization → separate task
+- [ ] Refactoring unrelated code → out of scope
+
+### Completion Criteria:
+- Code compiles without errors
+- Unit tests pass
+- lsp_diagnostics clean on modified files
+- Ready for: [next phase - e2e/integration/docs/review]
+
+## COMPLETION REPORT FORMAT (MANDATORY - Agent MUST return this)
+
+\`\`\`
+TASK COMPLETION REPORT
+======================
+Task: [Task ID and description]
+Status: [DONE | PARTIAL | BLOCKED]
+
+FILES MODIFIED:
+- [file1.ts] - [what changed]
+- [file2.ts] - [what changed]
+
+UNIT TESTS:
+- Added: [list new test files/cases]
+- Results: [X passed, Y failed]
+
+VERIFICATION:
+- [ ] lsp_diagnostics: [clean/errors]
+- [ ] Build: [pass/fail]
+- [ ] Unit tests: [pass/fail]
+
+READY FOR NEXT PHASE:
+- [ ] E2E testing (if applicable)
+- [ ] Integration testing (if applicable)
+- [ ] Documentation update
+- [ ] Code review
+
+NOTES/BLOCKERS:
+[Any issues encountered or decisions made]
+\`\`\`
 \`\`\`
 
 **PROMPT LENGTH CHECK**: Your prompt should be 50-200 lines. If it's under 20 lines, it's TOO SHORT.
@@ -1116,6 +1182,25 @@ Task N: [exact task description]
 
 ### Dependencies
 [What previous tasks built that this depends on]
+
+## SCOPE BOUNDARIES
+
+### This Task Includes:
+- [ ] Implement the token refresh logic change
+- [ ] Unit tests for the new buffer timing
+
+### This Task EXCLUDES:
+- [ ] E2E tests → separate task
+- [ ] Integration tests → separate task
+- [ ] Documentation → document-writer
+
+### Completion Criteria:
+- Code compiles, unit tests pass
+- Ready for: integration testing
+
+## COMPLETION REPORT FORMAT
+Return a structured report with: Task status, Files modified,
+Unit tests added/results, Verification checklist, Ready for next phase.
 \`
 )
 \`\`\`
@@ -1296,6 +1381,53 @@ The power of orchestration is CUMULATIVE LEARNING. After each task:
    - Commands: "Use npm run test:unit not npm test"
 3. **Pass forward** to ALL subsequent subagents
 
+### HANDOFF PROTOCOL (Task Completion → Next Delegation)
+
+When a subagent completes a task and returns a COMPLETION REPORT:
+
+1. **Parse the report** - Extract status, files modified, verification results
+2. **Check "Ready for next phase"** section to determine next delegation:
+
+| Ready For | Delegate To | Category/Agent |
+|-----------|-------------|----------------|
+| E2E testing | testing task | \`category="general"\` with e2e scope |
+| Integration testing | testing task | \`category="general"\` with integration scope |
+| Documentation | document-writer | \`agent="document-writer"\` |
+| Code review | oracle | \`agent="oracle"\` (read-only) |
+| Production deploy | git-master | \`agent="git-master"\` for final commit |
+
+3. **Pass context forward** - Include in next delegation:
+   - What was just completed
+   - Files that were modified
+   - Any notes/blockers from previous task
+
+**Example handoff:**
+\`\`\`typescript
+// After implementation task completes with "Ready for: E2E testing"
+sisyphus_task(
+  category="general",
+  prompt=\`
+  ## TASK
+  E2E tests for authentication token refresh feature
+
+  ## SCOPE BOUNDARIES
+  ### This Task Includes:
+  - [ ] E2E tests for token refresh flow
+  - [ ] Test happy path and error cases
+
+  ### This Task EXCLUDES:
+  - [ ] Modifying implementation code (already done)
+  - [ ] Unit tests (already done)
+
+  ## CONTEXT FROM PREVIOUS TASK
+  Implementation completed by previous agent:
+  - Files modified: src/auth/token.ts
+  - Unit tests added: src/auth/token.test.ts (all passing)
+  - Token refresh buffer changed from 60s to 300s
+  \`
+)
+\`\`\`
+
 ### NOTEPAD SYSTEM (CRITICAL FOR KNOWLEDGE TRANSFER)
 
 All learnings, decisions, and insights MUST be recorded in the notepad system for persistence across sessions AND passed to subagents.
@@ -1415,32 +1547,34 @@ You are the MASTER ORCHESTRATOR. Your job is to:
 
 NEVER skip steps. NEVER rush. Complete ALL tasks.
 </guide>
-`
+`;
 
 function buildDynamicOrchestratorPrompt(ctx?: OrchestratorContext): string {
-  const agents = ctx?.availableAgents ?? []
-  const skills = ctx?.availableSkills ?? []
-  const userCategories = ctx?.userCategories
+  const agents = ctx?.availableAgents ?? [];
+  const skills = ctx?.availableSkills ?? [];
+  const userCategories = ctx?.userCategories;
 
-  const categorySection = buildCategorySection(userCategories)
-  const agentSection = buildAgentSelectionSection(agents)
-  const decisionMatrix = buildDecisionMatrix(agents, userCategories)
-  const skillsSection = buildSkillsSection(skills)
+  const categorySection = buildCategorySection(userCategories);
+  const agentSection = buildAgentSelectionSection(agents);
+  const decisionMatrix = buildDecisionMatrix(agents, userCategories);
+  const skillsSection = buildSkillsSection(skills);
 
-  return ORCHESTRATOR_SISYPHUS_SYSTEM_PROMPT
-    .replace("{CATEGORY_SECTION}", categorySection)
+  return ORCHESTRATOR_SISYPHUS_SYSTEM_PROMPT.replace(
+    "{CATEGORY_SECTION}",
+    categorySection,
+  )
     .replace("{AGENT_SECTION}", agentSection)
     .replace("{DECISION_MATRIX}", decisionMatrix)
-    .replace("{SKILLS_SECTION}", skillsSection)
+    .replace("{SKILLS_SECTION}", skillsSection);
 }
 
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4-5"
+const DEFAULT_MODEL = "anthropic/claude-opus-4-5";
 
-export function createOrchestratorSisyphusAgent(ctx?: OrchestratorContext): AgentConfig {
-  const restrictions = createAgentToolRestrictions([
-    "task",
-    "call_omo_agent",
-  ])
+export function createOrchestratorSisyphusAgent(
+  ctx?: OrchestratorContext,
+): AgentConfig {
+  const restrictions = createAgentToolRestrictions(["task", "call_omo_agent"]);
+
   return {
     description:
       "Orchestrates work via sisyphus_task() to complete ALL tasks in a todo list until fully done",
@@ -1451,10 +1585,11 @@ export function createOrchestratorSisyphusAgent(ctx?: OrchestratorContext): Agen
     thinking: { type: "enabled", budgetTokens: 32000 },
     color: "#10B981",
     ...restrictions,
-  } as AgentConfig
+  } as AgentConfig;
 }
 
-export const orchestratorSisyphusAgent: AgentConfig = createOrchestratorSisyphusAgent()
+export const orchestratorSisyphusAgent: AgentConfig =
+  createOrchestratorSisyphusAgent();
 
 export const orchestratorSisyphusPromptMetadata: AgentPromptMetadata = {
   category: "advisor",
@@ -1482,4 +1617,4 @@ export const orchestratorSisyphusPromptMetadata: AgentPromptMetadata = {
   ],
   keyTrigger:
     "Todo list path provided OR multiple tasks requiring multi-agent orchestration",
-}
+};

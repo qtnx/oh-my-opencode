@@ -1,5 +1,8 @@
-import { createBuiltinAgents } from "../agents";
+import { createBuiltinAgents, mergeAgentConfig } from "../agents/utils";
 import { createSisyphusJuniorAgentWithOverrides } from "../agents/sisyphus-junior";
+import { createOrchestratorSisyphusAgent } from "../agents/orchestrator-sisyphus";
+import type { AvailableAgent } from "../agents/sisyphus-prompt-builder";
+import type { BuiltinAgentName } from "../agents/types";
 import {
   loadUserCommands,
   loadProjectCommands,
@@ -17,13 +20,17 @@ import {
   loadUserAgents,
   loadProjectAgents,
 } from "../features/claude-code-agent-loader";
+import { loadAllOpencodeAgents } from "../features/opencode-agent-loader";
 import { loadMcpConfigs } from "../features/claude-code-mcp-loader";
 import { loadAllPluginComponents } from "../features/claude-code-plugin-loader";
 import { createBuiltinMcps } from "../mcp";
 import type { OhMyOpenCodeConfig } from "../config";
 import { log } from "../shared";
 import { migrateAgentConfig } from "../shared/permission-compat";
-import { PROMETHEUS_SYSTEM_PROMPT, PROMETHEUS_PERMISSION } from "../agents/prometheus-prompt";
+import {
+  PROMETHEUS_SYSTEM_PROMPT,
+  PROMETHEUS_PERMISSION,
+} from "../agents/prometheus-prompt";
 import { DEFAULT_CATEGORIES } from "../tools/sisyphus-task/constants";
 import type { ModelCacheState } from "../plugin-state";
 import type { CategoryConfig } from "../config/schema";
@@ -36,7 +43,7 @@ export interface ConfigHandlerDeps {
 
 export function resolveCategoryConfig(
   categoryName: string,
-  userCategories?: Record<string, CategoryConfig>
+  userCategories?: Record<string, CategoryConfig>,
 ): CategoryConfig | undefined {
   return userCategories?.[categoryName] ?? DEFAULT_CATEGORIES[categoryName];
 }
@@ -67,7 +74,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
             if (contextLimit) {
               modelCacheState.modelContextLimitsCache.set(
                 `${providerID}/${modelID}`,
-                contextLimit
+                contextLimit,
               );
             }
           }
@@ -75,19 +82,20 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       }
     }
 
-    const pluginComponents = (pluginConfig.claude_code?.plugins ?? true)
-      ? await loadAllPluginComponents({
-          enabledPluginsOverride: pluginConfig.claude_code?.plugins_override,
-        })
-      : {
-          commands: {},
-          skills: {},
-          agents: {},
-          mcpServers: {},
-          hooksConfigs: [],
-          plugins: [],
-          errors: [],
-        };
+    const pluginComponents =
+      (pluginConfig.claude_code?.plugins ?? true)
+        ? await loadAllPluginComponents({
+            enabledPluginsOverride: pluginConfig.claude_code?.plugins_override,
+          })
+        : {
+            commands: {},
+            skills: {},
+            agents: {},
+            mcpServers: {},
+            hooksConfigs: [],
+            plugins: [],
+            errors: [],
+          };
 
     if (pluginComponents.plugins.length > 0) {
       log(`Loaded ${pluginComponents.plugins.length} Claude Code plugins`, {
@@ -99,23 +107,42 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       log(`Plugin load errors`, { errors: pluginComponents.errors });
     }
 
-    const builtinAgents = createBuiltinAgents(
-      pluginConfig.disabled_agents,
-      pluginConfig.agents,
-      ctx.directory,
-      config.model as string | undefined,
-      pluginConfig.categories
-    );
+    const { agents: builtinAgents, availableAgents: builtinAvailableAgents } =
+      createBuiltinAgents(
+        pluginConfig.disabled_agents,
+        pluginConfig.agents,
+        ctx.directory,
+        config.model as string | undefined,
+        pluginConfig.categories,
+      );
 
     // Claude Code agents: Do NOT apply permission migration
     // Claude Code uses whitelist-based tools format which is semantically different
     // from OpenCode's denylist-based permission system
-    const userAgents = (pluginConfig.claude_code?.agents ?? true)
-      ? loadUserAgents()
-      : {};
-    const projectAgents = (pluginConfig.claude_code?.agents ?? true)
-      ? loadProjectAgents()
-      : {};
+    const userAgents =
+      (pluginConfig.claude_code?.agents ?? true) ? loadUserAgents() : {};
+    const projectAgents =
+      (pluginConfig.claude_code?.agents ?? true) ? loadProjectAgents() : {};
+
+    // OpenCode agents: load from .opencode/agent/ and ~/.config/opencode/agent/
+    // Only agents with omo_agent metadata are loaded
+    const opencodeAgents = loadAllOpencodeAgents();
+    const opencodeAgentConfigs = Object.fromEntries(
+      opencodeAgents.map((a) => [a.name, a.config]),
+    );
+    const opencodeAvailableAgents: AvailableAgent[] = opencodeAgents.map(
+      (a) => ({
+        name: a.name as BuiltinAgentName,
+        description: a.config.description ?? "",
+        metadata: a.metadata,
+      }),
+    );
+
+    if (opencodeAgents.length > 0) {
+      log(`Loaded ${opencodeAgents.length} OpenCode agents`, {
+        agents: opencodeAgents.map((a) => a.name),
+      });
+    }
 
     // Plugin agents: Apply permission migration for compatibility
     const rawPluginAgents = pluginComponents.agents;
@@ -123,20 +150,16 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       Object.entries(rawPluginAgents).map(([k, v]) => [
         k,
         v ? migrateAgentConfig(v as Record<string, unknown>) : v,
-      ])
+      ]),
     );
 
     const isSisyphusEnabled = pluginConfig.sisyphus_agent?.disabled !== true;
     const builderEnabled =
       pluginConfig.sisyphus_agent?.default_builder_enabled ?? false;
-    const plannerEnabled =
-      pluginConfig.sisyphus_agent?.planner_enabled ?? true;
+    const plannerEnabled = pluginConfig.sisyphus_agent?.planner_enabled ?? true;
     const replacePlan = pluginConfig.sisyphus_agent?.replace_plan ?? true;
 
-    type AgentConfig = Record<
-      string,
-      Record<string, unknown> | undefined
-    > & {
+    type AgentConfig = Record<string, Record<string, unknown> | undefined> & {
       build?: Record<string, unknown>;
       plan?: Record<string, unknown>;
       explore?: { tools?: Record<string, unknown> };
@@ -154,14 +177,14 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       };
 
       agentConfig["Sisyphus-Junior"] = createSisyphusJuniorAgentWithOverrides(
-        pluginConfig.agents?.["Sisyphus-Junior"]
+        pluginConfig.agents?.["Sisyphus-Junior"],
       );
 
       if (builderEnabled) {
         const { name: _buildName, ...buildConfigWithoutName } =
           configAgent?.build ?? {};
         const migratedBuildConfig = migrateAgentConfig(
-          buildConfigWithoutName as Record<string, unknown>
+          buildConfigWithoutName as Record<string, unknown>,
         );
         const openCodeBuilderOverride =
           pluginConfig.agents?.["OpenCode-Builder"];
@@ -176,10 +199,13 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       }
 
       if (plannerEnabled) {
-        const { name: _planName, mode: _planMode, ...planConfigWithoutName } =
-          configAgent?.plan ?? {};
+        const {
+          name: _planName,
+          mode: _planMode,
+          ...planConfigWithoutName
+        } = configAgent?.plan ?? {};
         const migratedPlanConfig = migrateAgentConfig(
-          planConfigWithoutName as Record<string, unknown>
+          planConfigWithoutName as Record<string, unknown>,
         );
         const prometheusOverride =
           pluginConfig.agents?.["Prometheus (Planner)"] as
@@ -193,7 +219,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
         const categoryConfig = prometheusOverride?.category
           ? resolveCategoryConfig(
               prometheusOverride.category,
-              pluginConfig.categories
+              pluginConfig.categories,
             )
           : undefined;
 
@@ -219,7 +245,9 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
             ? { maxTokens: categoryConfig.maxTokens }
             : {}),
           ...(categoryConfig?.tools ? { tools: categoryConfig.tools } : {}),
-          ...(categoryConfig?.thinking ? { thinking: categoryConfig.thinking } : {}),
+          ...(categoryConfig?.thinking
+            ? { thinking: categoryConfig.thinking }
+            : {}),
           ...(categoryConfig?.reasoningEffort !== undefined
             ? { reasoningEffort: categoryConfig.reasoningEffort }
             : {}),
@@ -233,20 +261,22 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
           : prometheusBase;
       }
 
-    const filteredConfigAgents = configAgent
-      ? Object.fromEntries(
-          Object.entries(configAgent)
-            .filter(([key]) => {
-              if (key === "build") return false;
-              if (key === "plan" && replacePlan) return false;
-              return true;
-            })
-            .map(([key, value]) => [
-              key,
-              value ? migrateAgentConfig(value as Record<string, unknown>) : value,
-            ])
-        )
-      : {};
+      const filteredConfigAgents = configAgent
+        ? Object.fromEntries(
+            Object.entries(configAgent)
+              .filter(([key]) => {
+                if (key === "build") return false;
+                if (key === "plan" && replacePlan) return false;
+                return true;
+              })
+              .map(([key, value]) => [
+                key,
+                value
+                  ? migrateAgentConfig(value as Record<string, unknown>)
+                  : value,
+              ]),
+          )
+        : {};
 
       const migratedBuild = configAgent?.build
         ? migrateAgentConfig(configAgent.build as Record<string, unknown>)
@@ -259,10 +289,11 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       config.agent = {
         ...agentConfig,
         ...Object.fromEntries(
-          Object.entries(builtinAgents).filter(([k]) => k !== "Sisyphus")
+          Object.entries(builtinAgents).filter(([k]) => k !== "Sisyphus"),
         ),
         ...userAgents,
         ...projectAgents,
+        ...opencodeAgentConfigs,
         ...pluginAgents,
         ...filteredConfigAgents,
         build: { ...migratedBuild, mode: "subagent", hidden: true },
@@ -273,9 +304,34 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
         ...builtinAgents,
         ...userAgents,
         ...projectAgents,
+        ...opencodeAgentConfigs,
         ...pluginAgents,
         ...configAgent,
       };
+    }
+
+    // Create orchestrator-sisyphus with ALL available agents (builtin + opencode)
+    const allAvailableAgents: AvailableAgent[] = [
+      ...builtinAvailableAgents,
+      ...opencodeAvailableAgents,
+    ];
+
+    const orchestratorOverride = pluginConfig.agents?.["orchestrator-sisyphus"];
+    const orchestratorConfig = createOrchestratorSisyphusAgent({
+      model: orchestratorOverride?.model,
+      availableAgents: allAvailableAgents,
+    });
+
+    if (orchestratorOverride) {
+      const mergedOrchestrator = mergeAgentConfig(
+        orchestratorConfig,
+        orchestratorOverride,
+      );
+      (config.agent as Record<string, unknown>)["orchestrator-sisyphus"] =
+        mergedOrchestrator;
+    } else {
+      (config.agent as Record<string, unknown>)["orchestrator-sisyphus"] =
+        orchestratorConfig;
     }
 
     const agentResult = config.agent as AgentConfig;
@@ -306,8 +362,16 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       };
     }
     if (agentResult["Prometheus (Planner)"]) {
-      (agentResult["Prometheus (Planner)"] as { tools?: Record<string, unknown> }).tools = {
-        ...(agentResult["Prometheus (Planner)"] as { tools?: Record<string, unknown> }).tools,
+      (
+        agentResult["Prometheus (Planner)"] as {
+          tools?: Record<string, unknown>;
+        }
+      ).tools = {
+        ...(
+          agentResult["Prometheus (Planner)"] as {
+            tools?: Record<string, unknown>;
+          }
+        ).tools,
         call_omo_agent: false,
       };
     }
@@ -318,9 +382,10 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       external_directory: "allow",
     };
 
-    const mcpResult = (pluginConfig.claude_code?.mcp ?? true)
-      ? await loadMcpConfigs()
-      : { servers: {} };
+    const mcpResult =
+      (pluginConfig.claude_code?.mcp ?? true)
+        ? await loadMcpConfigs()
+        : { servers: {} };
 
     config.mcp = {
       ...(config.mcp as Record<string, unknown>),

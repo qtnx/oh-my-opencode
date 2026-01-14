@@ -1,5 +1,16 @@
 import type { PluginInput } from "@opencode-ai/plugin"
-import { getCachedVersion, getLocalDevVersion, findPluginEntry, getLatestVersion, updatePinnedVersion } from "./checker"
+import {
+  getCachedVersion,
+  getLocalDevVersion,
+  getLocalDevPath,
+  findPluginEntry,
+  getLatestVersion,
+  updatePinnedVersion,
+  getGitRepoRoot,
+  checkGitUpdates,
+  runGitUpdateAndBuild,
+  getGitShortInfo,
+} from "./checker"
 import { invalidatePackage } from "./cache"
 import { PACKAGE_NAME } from "./constants"
 import { log } from "../../shared/logger"
@@ -77,10 +88,23 @@ export function createAutoUpdateCheckerHook(ctx: PluginInput, options: AutoUpdat
         await showConfigErrorsIfAny(ctx)
 
         if (localDevVersion) {
+          log("[auto-update-checker] Local development mode")
+
+          // Check for git updates first, then show appropriate toast
+          if (autoUpdate) {
+            const updated = await runLocalDevUpdateCheck(ctx, isSisyphusEnabled).catch(err => {
+              log("[auto-update-checker] Local dev update check failed:", err)
+              return false
+            })
+
+            // If updated, toast was already shown by runLocalDevUpdateCheck
+            if (updated) return
+          }
+
+          // No update or autoUpdate disabled - show normal toast
           if (showStartupToast) {
             showLocalDevToast(ctx, displayVersion, isSisyphusEnabled).catch(() => {})
           }
-          log("[auto-update-checker] Local development mode")
           return
         }
 
@@ -247,12 +271,100 @@ async function showAutoUpdatedToast(ctx: PluginInput, oldVersion: string, newVer
 }
 
 async function showLocalDevToast(ctx: PluginInput, version: string | null, isSisyphusEnabled: boolean): Promise<void> {
-  const displayVersion = version ?? "dev"
+  // Get git commit info for local dev display
+  const localDevPath = getLocalDevPath(ctx.directory)
+  const repoRoot = localDevPath ? getGitRepoRoot(localDevPath) : null
+  const gitInfo = repoRoot ? getGitShortInfo(repoRoot) : null
+
+  // Show git commit in title instead of package.json version
+  const displayVersion = gitInfo ? `dev@${gitInfo.commit}` : (version ?? "dev")
+
   const message = isSisyphusEnabled
-    ? "Sisyphus running in local development mode."
-    : "Running in local development mode. oMoMoMo..."
-  await showSpinnerToast(ctx, `${displayVersion} (dev)`, message)
-  log(`[auto-update-checker] Local dev toast shown: v${displayVersion}`)
+    ? "Sisyphus running in local dev mode."
+    : "Running in local dev mode. oMoMoMo..."
+  await showSpinnerToast(ctx, displayVersion, message)
+  log(`[auto-update-checker] Local dev toast shown: ${displayVersion}`)
+}
+
+// ============================================
+// Git-based auto-update for local dev mode
+// ============================================
+
+async function runLocalDevUpdateCheck(ctx: PluginInput, isSisyphusEnabled: boolean): Promise<boolean> {
+  const localDevPath = getLocalDevPath(ctx.directory)
+  if (!localDevPath) {
+    log("[git-update] No local dev path found")
+    return false
+  }
+
+  const repoRoot = getGitRepoRoot(localDevPath)
+  if (!repoRoot) {
+    log("[git-update] No git repository found")
+    return false
+  }
+
+  const gitInfo = getGitShortInfo(repoRoot)
+  const currentInfo = gitInfo ? `${gitInfo.branch}@${gitInfo.commit}` : "unknown"
+
+  log(`[git-update] Checking for updates in ${repoRoot} (${currentInfo})`)
+
+  const updateResult = checkGitUpdates(repoRoot)
+
+  if (!updateResult.hasUpdates) {
+    log("[git-update] Already up to date")
+    return false
+  }
+
+  log(`[git-update] Updates available, starting auto-update...`)
+
+  // Show updating toast
+  await ctx.client.tui
+    .showToast({
+      body: {
+        title: "OhMyOpenCode (dev)",
+        message: isSisyphusEnabled
+          ? "Sisyphus is updating from git..."
+          : "Updating from git... oMoMoMo...",
+        variant: "info" as const,
+        duration: 3000,
+      },
+    })
+    .catch(() => {})
+
+  const success = await runGitUpdateAndBuild(repoRoot)
+
+  if (success) {
+    const newGitInfo = getGitShortInfo(repoRoot)
+    const newInfo = newGitInfo ? `${newGitInfo.branch}@${newGitInfo.commit}` : "unknown"
+
+    await ctx.client.tui
+      .showToast({
+        body: {
+          title: "OhMyOpenCode Updated!",
+          message: `${currentInfo} → ${newInfo}\nRestart OpenCode to apply.`,
+          variant: "success" as const,
+          duration: 8000,
+        },
+      })
+      .catch(() => {})
+
+    log(`[git-update] Update successful: ${currentInfo} → ${newInfo}`)
+    return true
+  } else {
+    await ctx.client.tui
+      .showToast({
+        body: {
+          title: "OhMyOpenCode Update Failed",
+          message: "Git pull or build failed. Check logs for details.",
+          variant: "error" as const,
+          duration: 8000,
+        },
+      })
+      .catch(() => {})
+
+    log("[git-update] Update failed")
+    return false
+  }
 }
 
 export type { UpdateCheckResult, AutoUpdateCheckerOptions } from "./types"

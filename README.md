@@ -255,26 +255,32 @@ If you don't want all this, as mentioned, you can just pick and choose specific 
 
 ## Installation
 
-
-### For Humans
-
-Run the interactive installer:
+One command for everything (install or update):
 
 ```bash
-bunx oh-my-opencode install
-# or use npx if bunx doesn't work
-npx oh-my-opencode install
+# One command for everything (install or update)
+curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/refs/heads/dev/script/install-local.sh | bash
 ```
 
-> **Note for Ubuntu/Debian users**: If you installed Bun via Snap (`/snap/bin/bun`), `bunx` will fail with "script not found" due to Snap's sandboxing. Either use `npx` instead, or reinstall Bun via the official installer: `curl -fsSL https://bun.sh/install | bash`
+This will:
+- Clone repo to `~/.local/share/oh-my-opencode`
+- Build the plugin
+- Link to `~/.config/opencode/plugin/oh-my-opencode.js`
+- Sync shared config files (`opencode.json`, `AGENTS.md`) with backup
+- Remove old `oh-my-opencode` entries from `opencode.json`
 
-Follow the prompts to configure your Claude, ChatGPT, and Gemini subscriptions. After installation, authenticate your providers as instructed.
+**Run the same command to update** - it auto-detects and pulls latest changes.
 
-**Alternative: Let an LLM Agent do it**
+**Other commands:**
+```bash
+# Check status
+curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/refs/heads/dev/script/install-local.sh | bash -s status
 
-Paste this into a fresh opencode session:
-```
-Install and configure by following the instructions here https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/refs/heads/master/README.md
+# Rebuild without pulling (for local changes)
+curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/refs/heads/dev/script/install-local.sh | bash -s rebuild
+
+# Uninstall
+curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/refs/heads/dev/script/install-local.sh | bash -s uninstall
 ```
 
 ### For LLM Agents
@@ -285,24 +291,6 @@ Install and configure by following the instructions here https://raw.githubuserc
 If you're an LLM Agent helping set up oh-my-opencode, Welcome! You'll now help your user to install the best agent harness, OhMyOpenCode. Tell user this with greetings, with test 'oMoMoMoMo...'
 
 follow these steps:
-
-### Step 0: Ask user about subscriptions
-
-Ask the user these 3 questions to determine CLI options:
-
-1. **Do you have a Claude Pro/Max Subscription?**
-   - If **yes**: **Are you on max20 (20x mode)?**
-     - **max20** → `--claude=max20`
-     - **not max20** → `--claude=yes`
-   - If **no** → `--claude=no`
-
-2. **Do you have a ChatGPT Subscription?**
-   - If **yes** → `--chatgpt=yes`
-   - If **no** → `--chatgpt=no`
-
-3. **Will you integrate Gemini models?**
-   - If **yes** → `--gemini=yes`
-   - If **no** → `--gemini=no`
 
 ### Step 1: Install OpenCode (if not installed)
 
@@ -320,21 +308,16 @@ Spawn a subagent to handle installation and report back - to save context.
 
 ### Step 2: Run the installer
 
-Based on user's answers, run the CLI installer with appropriate flags:
-
 ```bash
-bunx oh-my-opencode install --no-tui --claude=<yes|no|max20> --chatgpt=<yes|no> --gemini=<yes|no>
+curl -fsSL https://raw.githubusercontent.com/qtnx/oh-my-opencode/refs/heads/dev/script/install-local.sh | bash
 ```
 
-**Examples:**
-- User has all subscriptions with max20: `bunx oh-my-opencode install --no-tui --claude=max20 --chatgpt=yes --gemini=yes`
-- User has only Claude (no max20): `bunx oh-my-opencode install --no-tui --claude=yes --chatgpt=no --gemini=no`
-- User has no subscriptions: `bunx oh-my-opencode install --no-tui --claude=no --chatgpt=no --gemini=no`
-
-The CLI will:
-- Register the plugin in `opencode.json`
-- Configure agent models based on subscription flags
-- Show which auth steps are needed
+This will:
+- Clone/update the plugin source
+- Build the plugin
+- Link to OpenCode plugin directory
+- Sync shared config files with backup
+- Auto-update on future OpenCode starts
 
 ### Step 3: Verify Setup
 

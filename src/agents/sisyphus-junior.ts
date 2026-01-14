@@ -1,13 +1,13 @@
-import type { AgentConfig } from "@opencode-ai/sdk"
-import { isGptModel } from "./types"
-import type { AgentOverrideConfig, CategoryConfig } from "../config/schema"
+import type { AgentConfig } from "@opencode-ai/sdk";
+import { isGptModel } from "./types";
+import { AgentOverrideConfig, CategoryConfig } from "../config/schema";
 import {
   createAgentToolRestrictions,
   migrateAgentConfig,
   supportsNewPermissionSystem,
-} from "../shared/permission-compat"
+} from "../shared/permission-compat";
 
-const SISYPHUS_JUNIOR_PROMPT = `<Role>
+const SISYPHUS_JUNIOR_PROMPT_BASE = `<Role>
 Sisyphus-Junior - Focused executor from OhMyOpenCode.
 Execute tasks directly. NEVER delegate or spawn other agents.
 </Role>
@@ -15,11 +15,17 @@ Execute tasks directly. NEVER delegate or spawn other agents.
 <Critical_Constraints>
 BLOCKED ACTIONS (will fail if attempted):
 - task tool: BLOCKED
-- sisyphus_task tool: BLOCKED
+- sisyphus_task tool: BLOCKED`;
 
-ALLOWED: call_omo_agent - You CAN spawn explore/librarian agents for research.
-You work ALONE for implementation. No delegation of implementation tasks.
-</Critical_Constraints>
+const SISYPHUS_JUNIOR_PROMPT_CALL_OMO_BLOCKED = `
+- call_omo_agent tool: BLOCKED`;
+
+const SISYPHUS_JUNIOR_PROMPT_TAIL = `
+
+You work ALONE. No delegation. No background tasks. Execute directly.
+</Critical_Constraints>`;
+
+const SISYPHUS_JUNIOR_PROMPT_REST = `
 
 <Work_Context>
 ## Notepad Location (for recording learnings)
@@ -48,8 +54,8 @@ VIOLATION = IMMEDIATE FAILURE. The Orchestrator tracks plan state.
 
 <Todo_Discipline>
 TODO OBSESSION (NON-NEGOTIABLE):
-- 2+ steps → todowrite FIRST, atomic breakdown
 - Mark in_progress before starting (ONE at a time)
+- 2+ steps → todowrite FIRST, atomic breakdown
 - Mark completed IMMEDIATELY after each step
 - NEVER batch completions
 
@@ -67,60 +73,101 @@ Task NOT complete without:
 - Start immediately. No acknowledgments.
 - Match user's communication style.
 - Dense > verbose.
-</Style>`
+</Style>`;
 
-function buildSisyphusJuniorPrompt(promptAppend?: string): string {
-  if (!promptAppend) return SISYPHUS_JUNIOR_PROMPT
-  return SISYPHUS_JUNIOR_PROMPT + "\n\n" + promptAppend
+function buildSisyphusJuniorPrompt(
+  allowCallOmoAgent: boolean,
+  promptAppend?: string,
+): string {
+  const base = allowCallOmoAgent
+    ? SISYPHUS_JUNIOR_PROMPT_BASE + SISYPHUS_JUNIOR_PROMPT_TAIL
+    : SISYPHUS_JUNIOR_PROMPT_BASE +
+      SISYPHUS_JUNIOR_PROMPT_CALL_OMO_BLOCKED +
+      SISYPHUS_JUNIOR_PROMPT_TAIL;
+
+  const fullPrompt = base + SISYPHUS_JUNIOR_PROMPT_REST;
+  if (!promptAppend) return fullPrompt;
+  return fullPrompt + "\n\n" + promptAppend;
 }
 
 // Core tools that Sisyphus-Junior must NEVER have access to
-// Note: call_omo_agent is ALLOWED so subagents can spawn explore/librarian
-const BLOCKED_TOOLS = ["task", "sisyphus_task"]
+const BLOCKED_TOOLS = ["task", "sisyphus_task", "call_omo_agent"];
+
+// Prompt append for GPT models to suggest using omo agents for exploration
+// IMPORTANT: Must use run_in_background=false (sync mode) because background notifications
+// don't work in subagent context - the subagent session is idle when notification arrives
+const GPT_OWO_AGENT_HINT = `
+<OmoAgentHint>
+You have access to call_omo_agent tool. Use it to spawn specialized agents for faster work:
+- explore: Blazing fast codebase exploration (contextual grep)
+- librarian: Multi-repo analysis, official docs lookup, GitHub examples
+
+IMPORTANT: Always use run_in_background=false (sync mode). Background mode does NOT work in subagent context.
+
+Example:
+call_omo_agent(subagent_type="explore", prompt="Find all auth implementations", run_in_background=false)
+call_omo_agent(subagent_type="librarian", prompt="How does NextAuth handle JWT refresh?", run_in_background=false)
+</OmoAgentHint>`;
 
 export const SISYPHUS_JUNIOR_DEFAULTS = {
   model: "anthropic/claude-sonnet-4-5",
   temperature: 0.1,
-} as const
+} as const;
 
 export function createSisyphusJuniorAgentWithOverrides(
-  override: AgentOverrideConfig | undefined
+  override: AgentOverrideConfig | undefined,
 ): AgentConfig {
   if (override?.disable) {
-    override = undefined
+    override = undefined;
   }
 
-  const model = override?.model ?? SISYPHUS_JUNIOR_DEFAULTS.model
-  const temperature = override?.temperature ?? SISYPHUS_JUNIOR_DEFAULTS.temperature
+  const model = override?.model ?? SISYPHUS_JUNIOR_DEFAULTS.model;
+  const temperature =
+    override?.temperature ?? SISYPHUS_JUNIOR_DEFAULTS.temperature;
 
-  const promptAppend = override?.prompt_append
-  const prompt = buildSisyphusJuniorPrompt(promptAppend)
+  const isGpt = isGptModel(model);
+  const promptAppend = override?.prompt_append;
+  const effectivePromptAppend = isGpt
+    ? promptAppend
+      ? `${promptAppend}\n${GPT_OWO_AGENT_HINT}`
+      : GPT_OWO_AGENT_HINT
+    : promptAppend;
+  const prompt = buildSisyphusJuniorPrompt(isGpt, effectivePromptAppend);
 
-  const baseRestrictions = createAgentToolRestrictions(BLOCKED_TOOLS)
+  const blockedTools = BLOCKED_TOOLS.filter((t) => t !== "call_omo_agent");
+  const baseRestrictions = createAgentToolRestrictions(blockedTools);
 
-  let toolsConfig: Record<string, unknown> = {}
+  let toolsConfig: Record<string, unknown> = {};
   if (supportsNewPermissionSystem()) {
-    const userPermission = (override?.permission ?? {}) as Record<string, string>
-    const basePermission = (baseRestrictions as { permission: Record<string, string> }).permission
-    const merged: Record<string, string> = { ...userPermission }
+    const userPermission = (override?.permission ?? {}) as Record<string, string>;
+    const basePermission = (baseRestrictions as { permission: Record<string, string> })
+      .permission;
+    const merged: Record<string, string> = { ...userPermission };
     for (const tool of BLOCKED_TOOLS) {
-      merged[tool] = "deny"
+      if (tool === "call_omo_agent") {
+        merged[tool] = "allow";
+      } else {
+        merged[tool] = "deny";
+      }
     }
-    merged.call_omo_agent = "allow"
-    toolsConfig = { permission: { ...merged, ...basePermission } }
+    toolsConfig = { permission: { ...merged, ...basePermission } };
   } else {
-    const userTools = override?.tools ?? {}
-    const baseTools = (baseRestrictions as { tools: Record<string, boolean> }).tools
-    const merged: Record<string, boolean> = { ...userTools }
+    const userTools = override?.tools ?? {};
+    const baseTools = (baseRestrictions as { tools: Record<string, boolean> }).tools;
+    const merged: Record<string, boolean> = { ...userTools };
     for (const tool of BLOCKED_TOOLS) {
-      merged[tool] = false
+      if (tool === "call_omo_agent") {
+        merged[tool] = true;
+      } else {
+        merged[tool] = false;
+      }
     }
-    merged.call_omo_agent = true
-    toolsConfig = { tools: { ...merged, ...baseTools } }
+    toolsConfig = { tools: { ...merged, ...baseTools } };
   }
 
   const base: AgentConfig = {
-    description: override?.description ??
+    description:
+      override?.description ??
       "Sisyphus-Junior - Focused task executor. Same discipline, no delegation.",
     mode: "subagent" as const,
     model,
@@ -129,34 +176,45 @@ export function createSisyphusJuniorAgentWithOverrides(
     prompt,
     color: override?.color ?? "#20B2AA",
     ...toolsConfig,
-  }
+  };
 
   if (override?.top_p !== undefined) {
-    base.top_p = override.top_p
+    base.top_p = override.top_p;
   }
 
   if (isGptModel(model)) {
-    return { ...base, reasoningEffort: "medium" } as AgentConfig
+    return { ...base, reasoningEffort: "medium" } as AgentConfig;
   }
 
   return {
     ...base,
     thinking: { type: "enabled", budgetTokens: 32000 },
-  } as AgentConfig
+  } as AgentConfig;
 }
 
 export function createSisyphusJuniorAgent(
   categoryConfig: CategoryConfig,
-  promptAppend?: string
+  promptAppend?: string,
 ): AgentConfig {
-  const prompt = buildSisyphusJuniorPrompt(promptAppend)
-  const model = categoryConfig.model
-  const baseRestrictions = createAgentToolRestrictions(BLOCKED_TOOLS)
+  const model = categoryConfig.model;
+
+  // For GPT models: allow call_omo_agent and append usage hint
+  const isGpt = isGptModel(model);
+  const blockedTools = BLOCKED_TOOLS.filter((t) => t !== "call_omo_agent");
+
+  // Build prompt: GPT models get call_omo_agent unblocked + usage hint
+  const effectivePromptAppend = isGpt
+    ? promptAppend
+      ? `${promptAppend}\n${GPT_OWO_AGENT_HINT}`
+      : GPT_OWO_AGENT_HINT
+    : promptAppend;
+  const prompt = buildSisyphusJuniorPrompt(isGpt, effectivePromptAppend);
+
+  const baseRestrictions = createAgentToolRestrictions(blockedTools);
   const mergedConfig = migrateAgentConfig({
     ...baseRestrictions,
     ...(categoryConfig.tools ? { tools: categoryConfig.tools } : {}),
-  })
-
+  });
 
   const base: AgentConfig = {
     description:
@@ -167,17 +225,17 @@ export function createSisyphusJuniorAgent(
     prompt,
     color: "#20B2AA",
     ...mergedConfig,
-  }
+  };
 
   if (categoryConfig.temperature !== undefined) {
-    base.temperature = categoryConfig.temperature
+    base.temperature = categoryConfig.temperature;
   }
   if (categoryConfig.top_p !== undefined) {
-    base.top_p = categoryConfig.top_p
+    base.top_p = categoryConfig.top_p;
   }
 
   if (categoryConfig.thinking) {
-    return { ...base, thinking: categoryConfig.thinking } as AgentConfig
+    return { ...base, thinking: categoryConfig.thinking } as AgentConfig;
   }
 
   if (categoryConfig.reasoningEffort) {
@@ -185,15 +243,15 @@ export function createSisyphusJuniorAgent(
       ...base,
       reasoningEffort: categoryConfig.reasoningEffort,
       textVerbosity: categoryConfig.textVerbosity,
-    } as AgentConfig
+    } as AgentConfig;
   }
 
   if (isGptModel(model)) {
-    return { ...base, reasoningEffort: "medium" } as AgentConfig
+    return { ...base, reasoningEffort: "medium" } as AgentConfig;
   }
 
   return {
     ...base,
     thinking: { type: "enabled", budgetTokens: 32000 },
-  } as AgentConfig
+  } as AgentConfig;
 }
