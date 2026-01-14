@@ -318,7 +318,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
 
     const orchestratorOverride = pluginConfig.agents?.["orchestrator-sisyphus"];
     const orchestratorConfig = createOrchestratorSisyphusAgent({
-      model: orchestratorOverride?.model,
+      model: orchestratorOverride?.model ?? (builtinAgents.Sisyphus?.model as string | undefined),
       availableAgents: allAvailableAgents,
     });
 
