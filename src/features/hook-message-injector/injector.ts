@@ -16,36 +16,38 @@ export function findNearestMessageWithFields(messageDir: string): StoredMessage 
       .sort()
       .reverse()
 
-    // First pass: find message with ALL fields (ideal)
+    const result: StoredMessage = {}
+
     for (const file of files) {
+      if (result.agent && result.model?.providerID && result.model?.modelID && result.tools) {
+        break
+      }
+
       try {
         const content = readFileSync(join(messageDir, file), "utf-8")
         const msg = JSON.parse(content) as StoredMessage
-        if (msg.agent && msg.model?.providerID && msg.model?.modelID) {
-          return msg
+
+        if (!result.agent && msg.agent) {
+          result.agent = msg.agent
+        }
+
+        if (!result.model && msg.model?.providerID && msg.model?.modelID) {
+          result.model = msg.model
+        }
+
+        if (!result.tools && msg.tools) {
+          result.tools = msg.tools
         }
       } catch {
         continue
       }
     }
 
-    // Second pass: find message with ANY useful field (fallback)
-    // This ensures agent info isn't lost when model info is missing
-    for (const file of files) {
-      try {
-        const content = readFileSync(join(messageDir, file), "utf-8")
-        const msg = JSON.parse(content) as StoredMessage
-        if (msg.agent || (msg.model?.providerID && msg.model?.modelID)) {
-          return msg
-        }
-      } catch {
-        continue
-      }
-    }
+    if (Object.keys(result).length === 0) return null
+    return result
   } catch {
     return null
   }
-  return null
 }
 
 /**
