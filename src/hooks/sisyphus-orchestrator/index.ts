@@ -242,6 +242,7 @@ function getGitDiffStats(directory: string): GitFileStat[] {
       cwd: directory,
       encoding: "utf-8",
       timeout: 5000,
+      stdio: ["pipe", "pipe", "ignore"],
     }).trim()
 
     if (!output) return []
@@ -250,6 +251,7 @@ function getGitDiffStats(directory: string): GitFileStat[] {
       cwd: directory,
       encoding: "utf-8",
       timeout: 5000,
+      stdio: ["pipe", "pipe", "ignore"],
     }).trim()
 
     const statusMap = new Map<string, "modified" | "added" | "deleted">()
@@ -481,10 +483,17 @@ export function createSisyphusOrchestratorHook(
     try {
       log(`[${HOOK_NAME}] Injecting boulder continuation`, { sessionID, planName, remaining })
 
+      const messageDir = getMessageDir(sessionID)
+      const currentMessage = messageDir ? findNearestMessageWithFields(messageDir) : null
+      const model = currentMessage?.model?.providerID && currentMessage?.model?.modelID
+        ? { providerID: currentMessage.model.providerID, modelID: currentMessage.model.modelID }
+        : undefined
+
       await ctx.client.session.prompt({
         path: { id: sessionID },
         body: {
           agent: "orchestrator-sisyphus",
+          ...(model !== undefined ? { model } : {}),
           parts: [{ type: "text", text: prompt }],
         },
         query: { directory: ctx.directory },
@@ -732,10 +741,20 @@ export function createSisyphusOrchestratorHook(
             })
           }
 
+          // Preserve original subagent response - critical for debugging failed tasks
+          const originalResponse = output.output
+
           output.output = `
 ## SUBAGENT WORK COMPLETED
 
 ${fileChanges}
+
+---
+
+**Subagent Response:**
+
+${originalResponse}
+
 <system-reminder>
 ${buildOrchestratorReminder(boulderState.plan_name, progress, subagentSessionId)}
 </system-reminder>`
