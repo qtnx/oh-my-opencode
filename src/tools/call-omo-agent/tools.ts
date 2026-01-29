@@ -192,7 +192,8 @@ async function executeSync(
   log(`[call_omo_agent] Prompt text:`, args.prompt.substring(0, 100))
 
   // Use fire-and-forget prompt - awaiting causes issues with thinking models
-  let promptError: Error | undefined
+  // Using object container to prevent TypeScript control flow narrowing
+  const errorState = { error: undefined as Error | undefined }
   ctx.client.session.prompt({
     path: { id: sessionID },
     body: {
@@ -205,14 +206,14 @@ async function executeSync(
       parts: [{ type: "text", text: args.prompt }],
     },
   }).catch((error) => {
-    promptError = error instanceof Error ? error : new Error(String(error))
+    errorState.error = error instanceof Error ? error : new Error(String(error))
   })
 
   // Small delay to let the prompt start
   await new Promise(resolve => setTimeout(resolve, 100))
 
-  if (promptError) {
-    const errorMessage = promptError.message
+  if (errorState.error) {
+    const errorMessage = errorState.error.message
     log(`[call_omo_agent] Prompt error:`, errorMessage)
     if (errorMessage.includes("agent.name") || errorMessage.includes("undefined")) {
       return `Error: Agent "${args.subagent_type}" not found. Make sure the agent is registered in your opencode.json or provided by a plugin.\n\n<task_metadata>\nsession_id: ${sessionID}\n</task_metadata>`
@@ -240,9 +241,9 @@ async function executeSync(
 
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
 
-    // Check for async errors
-    if (promptError) {
-      const errorMessage = promptError.message
+    // Check for async errors (errorState.error can be set by the catch handler during async operations)
+    if (errorState.error) {
+      const errorMessage = (errorState.error as Error).message
       log(`[call_omo_agent] Async prompt error:`, errorMessage)
       if (errorMessage.includes("agent.name") || errorMessage.includes("undefined")) {
         return `Error: Agent "${args.subagent_type}" not found. Make sure the agent is registered in your opencode.json or provided by a plugin.\n\n<task_metadata>\nsession_id: ${sessionID}\n</task_metadata>`

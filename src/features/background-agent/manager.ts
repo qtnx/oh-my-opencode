@@ -1252,37 +1252,6 @@ Use \`background_output(task_id="${task.id}")\` to retrieve this result when rea
           continue
         }
 
-          // Re-check status after async operation
-          if (task.status !== "running") continue
-
-          const hasIncompleteTodos = await this.checkSessionTodos(sessionID)
-          if (hasIncompleteTodos) {
-            log("[background-agent] Task has incomplete todos via polling, waiting:", task.id)
-            continue
-          }
-
-<<<<<<< HEAD
-          await this.tryCompleteTask(task, "polling (idle status)")
-=======
-          task.status = "completed"
-          task.completedAt = new Date()
-          this.markForNotification(task)
-          await this.notifyParentSession(task)
-          log("[background-agent] Task completed via polling (session idle):", task.id)
-          continue
-        }
-
-        // Session is NOT idle - it's still running or status unknown
-        // Only use stability detection if session status is explicitly NOT in the status map
-        // If session is in the status map but not "idle", it means it's still processing
-        if (sessionStatus && sessionStatus.type !== "idle") {
-          // Reset stability counters since session is actively processing
-          task.stablePolls = 0
-          task.lastMsgCount = undefined
->>>>>>> afe7fed (fix(background-agent): prevent premature task completion)
-          continue
-        }
-
         const messagesResult = await this.client.session.messages({
           path: { id: sessionID },
         })

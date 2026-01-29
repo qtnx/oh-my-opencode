@@ -1948,7 +1948,7 @@ describe("BackgroundManager.handleEvent - session.idle", () => {
         if (!sessionID) return
 
         const task = this.findBySession(sessionID)
-        if (!task || task.status !== "running") return
+        if (!task || task.status !== "running" || !task.startedAt) return
 
         // Edge guard: Require minimum elapsed time before accepting idle
         const elapsedMs = Date.now() - task.startedAt.getTime()

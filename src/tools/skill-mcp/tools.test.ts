@@ -23,6 +23,10 @@ const mockContext = {
   messageID: "msg-1",
   agent: "test-agent",
   abort: new AbortController().signal,
+  directory: "/tmp/test",
+  worktree: "/tmp/test",
+  metadata: () => {},
+  ask: async () => {},
 }
 
 describe("skill_mcp tool", () => {

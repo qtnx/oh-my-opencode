@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "oh-my-opencode",
@@ -10,8 +9,8 @@
         "@clack/prompts": "^0.11.0",
         "@code-yeongyu/comment-checker": "^0.6.1",
         "@modelcontextprotocol/sdk": "^1.25.1",
-        "@opencode-ai/plugin": "^1.1.19",
-        "@opencode-ai/sdk": "^1.1.19",
+        "@opencode-ai/plugin": "^1.1.42",
+        "@opencode-ai/sdk": "^1.1.42",
         "commander": "^14.0.2",
         "detect-libc": "^2.0.0",
         "js-yaml": "^4.1.1",
@@ -89,9 +88,9 @@
 
     "@modelcontextprotocol/sdk": ["@modelcontextprotocol/sdk@1.25.1", "", { "dependencies": { "@hono/node-server": "^1.19.7", "ajv": "^8.17.1", "ajv-formats": "^3.0.1", "content-type": "^1.0.5", "cors": "^2.8.5", "cross-spawn": "^7.0.5", "eventsource": "^3.0.2", "eventsource-parser": "^3.0.0", "express": "^5.0.1", "express-rate-limit": "^7.5.0", "jose": "^6.1.1", "json-schema-typed": "^8.0.2", "pkce-challenge": "^5.0.0", "raw-body": "^3.0.0", "zod": "^3.25 || ^4.0", "zod-to-json-schema": "^3.25.0" }, "peerDependencies": { "@cfworker/json-schema": "^4.1.1" }, "optionalPeers": ["@cfworker/json-schema"] }, "sha512-yO28oVFFC7EBoiKdAn+VqRm+plcfv4v0xp6osG/VsCB0NlPZWi87ajbCZZ8f/RvOFLEu7//rSRmuZZ7lMoe3gQ=="],
 
-    "@opencode-ai/plugin": ["@opencode-ai/plugin@1.1.19", "", { "dependencies": { "@opencode-ai/sdk": "1.1.19", "zod": "4.1.8" } }, "sha512-Q6qBEjHb/dJMEw4BUqQxEswTMxCCHUpFMMb6jR8HTTs8X/28XRkKt5pHNPA82GU65IlSoPRph+zd8LReBDN53Q=="],
+    "@opencode-ai/plugin": ["@opencode-ai/plugin@1.1.42", "", { "dependencies": { "@opencode-ai/sdk": "1.1.42", "zod": "4.1.8" } }, "sha512-pKPGUSo980tlpfkeK1heKi+FyY5uAa8CffQ8CEvfmTiHkHhZaw0Cz79cSi2iWYxLzGgx4pQWUoq2YdVBiMWYHw=="],
 
-    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.1.19", "", {}, "sha512-XhZhFuvlLCqDpvNtUEjOsi/wvFj3YCXb1dySp+OONQRMuHlorNYnNa7P2A2ntKuhRdGT1Xt5na0nFzlUyNw+4A=="],
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.1.42", "", {}, "sha512-QuTJgnzmsQ+CF/mr9nu+FQGv2cMwGMsnWd7eOF0YLuXKOzpx+xlBkUGdZz8l0n3I+7ix8iiMZbTw4laAG8vIqA=="],
 
     "@types/js-yaml": ["@types/js-yaml@4.0.9", "", {}, "sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg=="],
 

@@ -490,7 +490,6 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       await directoryReadmeInjector?.["tool.execute.before"]?.(input, output);
       await rulesInjector?.["tool.execute.before"]?.(input, output);
       await prometheusMdOnly?.["tool.execute.before"]?.(input, output);
-      await sisyphusOrchestrator?.["tool.execute.before"]?.(input, output);
 
       if (input.tool === "task") {
         const args = output.args as Record<string, unknown>;
