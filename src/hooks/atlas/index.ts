@@ -424,7 +424,8 @@ function isCallerOrchestrator(sessionID?: string): boolean {
    const messageDir = getMessageDir(sessionID)
    if (!messageDir) return false
    const nearest = findNearestMessageWithFields(messageDir)
-   return nearest?.agent === "Atlas"
+   // Check for both "atlas" (registered name) and "Atlas" (display name) for backward compatibility
+   return nearest?.agent?.toLowerCase() === "atlas"
  }
 
 /**
