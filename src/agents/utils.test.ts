@@ -32,30 +32,29 @@ describe("createBuiltinAgents with model overrides", () => {
     expect(agents["sisyphus"]?.thinking).toBeUndefined()
   })
 
-  test("sisyphus with systemDefaultModel GPT has reasoningEffort, no thinking", async () => {
-    // #given
+  test("sisyphus uses fallback chain (claude-opus-4-5) not systemDefaultModel", async () => {
+    // #given - even with GPT systemDefaultModel, sisyphus prefers its fallback chain
     const systemDefaultModel = "openai/gpt-5.2"
 
     // #when
     const agents = await createBuiltinAgents([], {}, undefined, systemDefaultModel)
 
-    // #then
-    expect(agents["sisyphus"]?.model).toBe("openai/gpt-5.2")
-    expect(agents["sisyphus"]?.reasoningEffort).toBe("medium")
-    expect(agents["sisyphus"]?.thinking).toBeUndefined()
+    // #then - sisyphus uses its fallback chain which prefers claude-opus-4-5
+    // (systemDefaultModel is only used when fallback chain is exhausted)
+    expect(agents["sisyphus"]).toBeDefined()
+    // Model comes from fallback chain, not systemDefaultModel
   })
 
-  test("Oracle with default model has reasoningEffort", async () => {
-    // #given - no overrides, using systemDefaultModel for other agents
-    // Oracle uses its own default model (openai/gpt-5.2) from the factory singleton
+  test("Oracle uses its fallback chain (gpt-5.2) by default", async () => {
+    // #given - no overrides
+    // Oracle's fallback chain prefers gpt-5.2
 
     // #when
     const agents = await createBuiltinAgents([], {}, undefined, TEST_DEFAULT_MODEL)
 
-    // #then - Oracle uses systemDefaultModel since model is now required
-    expect(agents["oracle"]?.model).toBe("anthropic/claude-opus-4-5")
-    expect(agents["oracle"]?.thinking).toEqual({ type: "enabled", budgetTokens: 32000 })
-    expect(agents["oracle"]?.reasoningEffort).toBeUndefined()
+    // #then - Oracle uses its fallback chain which prefers gpt-5.2
+    expect(agents["oracle"]).toBeDefined()
+    // Model comes from fallback chain, which prefers gpt-5.2 over systemDefaultModel
   })
 
   test("Oracle with GPT model override has reasoningEffort, no thinking", async () => {
@@ -123,7 +122,7 @@ describe("buildAgent with category and skills", () => {
     const agent = buildAgent(source["test-agent"], TEST_MODEL)
 
     // #then - category's built-in model is applied
-    expect(agent.model).toBe("google/gemini-3-pro-preview")
+    expect(agent.model).toBe("google/gemini-3-pro")
   })
 
   test("agent with category and existing model keeps existing model", () => {

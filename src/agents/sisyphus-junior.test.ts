@@ -138,13 +138,13 @@ describe("createSisyphusJuniorAgentWithOverrides", () => {
     })
   })
 
-  describe("tool safety (task/delegate_task blocked, call_omo_agent allowed)", () => {
-    test("task and delegate_task remain blocked, call_omo_agent is allowed via tools format", () => {
-      // #given
+  describe("tool safety (task/sisyphus_task/call_omo_agent blocked for Claude)", () => {
+    test("task, sisyphus_task, call_omo_agent remain blocked for Claude models via tools format", () => {
+      // #given - default model is Claude, so call_omo_agent should be blocked
       const override = {
         tools: {
           task: true,
-          delegate_task: true,
+          sisyphus_task: true,
           call_omo_agent: true,
           read: true,
         },
@@ -153,30 +153,21 @@ describe("createSisyphusJuniorAgentWithOverrides", () => {
       // #when
       const result = createSisyphusJuniorAgentWithOverrides(override)
 
-      // #then
-      const tools = result.tools as Record<string, boolean> | undefined
+      // #then - all blocked tools stay blocked for Claude models
       const permission = result.permission as Record<string, string> | undefined
-      if (tools) {
-        expect(tools.task).toBe(false)
-        expect(tools.delegate_task).toBe(false)
-        // call_omo_agent is NOW ALLOWED for subagents to spawn explore/librarian
-        expect(tools.call_omo_agent).toBe(true)
-        expect(tools.read).toBe(true)
-      }
       if (permission) {
         expect(permission.task).toBe("deny")
-        expect(permission.delegate_task).toBe("deny")
-        // call_omo_agent is NOW ALLOWED for subagents to spawn explore/librarian
-        expect(permission.call_omo_agent).toBe("allow")
+        expect(permission.sisyphus_task).toBe("deny")
+        expect(permission.call_omo_agent).toBe("deny")
       }
     })
 
-    test("task and delegate_task remain blocked when using permission format override", () => {
+    test("task and sisyphus_task remain blocked when using permission format override", () => {
       // #given
       const override = {
         permission: {
           task: "allow",
-          delegate_task: "allow",
+          sisyphus_task: "allow",
           call_omo_agent: "allow",
           read: "allow",
         },
@@ -185,17 +176,29 @@ describe("createSisyphusJuniorAgentWithOverrides", () => {
       // #when
       const result = createSisyphusJuniorAgentWithOverrides(override as Parameters<typeof createSisyphusJuniorAgentWithOverrides>[0])
 
-      // #then - task/delegate_task blocked, but call_omo_agent allowed for explore/librarian spawning
-      const tools = result.tools as Record<string, boolean> | undefined
+      // #then - task/sisyphus_task/call_omo_agent blocked for Claude models
       const permission = result.permission as Record<string, string> | undefined
-      if (tools) {
-        expect(tools.task).toBe(false)
-        expect(tools.delegate_task).toBe(false)
-        expect(tools.call_omo_agent).toBe(true)
-      }
       if (permission) {
         expect(permission.task).toBe("deny")
-        expect(permission.delegate_task).toBe("deny")
+        expect(permission.sisyphus_task).toBe("deny")
+        expect(permission.call_omo_agent).toBe("deny")
+      }
+    })
+
+    test("call_omo_agent is allowed for GPT models", () => {
+      // #given - GPT model specified
+      const override = {
+        model: "openai/gpt-5.2",
+      }
+
+      // #when
+      const result = createSisyphusJuniorAgentWithOverrides(override)
+
+      // #then - call_omo_agent is allowed for GPT models
+      const permission = result.permission as Record<string, string> | undefined
+      if (permission) {
+        expect(permission.task).toBe("deny")
+        expect(permission.sisyphus_task).toBe("deny")
         expect(permission.call_omo_agent).toBe("allow")
       }
     })
