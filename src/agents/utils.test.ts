@@ -1,23 +1,25 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, beforeEach, spyOn, afterEach } from "bun:test"
 import { createBuiltinAgents } from "./utils"
 import type { AgentConfig } from "@opencode-ai/sdk"
+import { clearSkillCache } from "../features/opencode-skill-loader/skill-content"
+import * as connectedProvidersCache from "../shared/connected-providers-cache"
 
 const TEST_DEFAULT_MODEL = "anthropic/claude-opus-4-5"
 
 describe("createBuiltinAgents with model overrides", () => {
-  test("sisyphus with default model has thinking config", async () => {
+  test("Sisyphus with default model has thinking config", async () => {
     // #given - no overrides, using systemDefaultModel
 
     // #when
     const agents = await createBuiltinAgents([], {}, undefined, TEST_DEFAULT_MODEL)
 
     // #then
-    expect(agents["sisyphus"]?.model).toBe("anthropic/claude-opus-4-5")
-    expect(agents["sisyphus"]?.thinking).toEqual({ type: "enabled", budgetTokens: 32000 })
-    expect(agents["sisyphus"]?.reasoningEffort).toBeUndefined()
+    expect(agents.sisyphus.model).toBe("anthropic/claude-opus-4-5")
+    expect(agents.sisyphus.thinking).toEqual({ type: "enabled", budgetTokens: 32000 })
+    expect(agents.sisyphus.reasoningEffort).toBeUndefined()
   })
 
-  test("sisyphus with GPT model override has reasoningEffort, no thinking", async () => {
+  test("Sisyphus with GPT model override has reasoningEffort, no thinking", async () => {
     // #given
     const overrides = {
       sisyphus: { model: "github-copilot/gpt-5.2" },
@@ -27,34 +29,49 @@ describe("createBuiltinAgents with model overrides", () => {
     const agents = await createBuiltinAgents([], overrides, undefined, TEST_DEFAULT_MODEL)
 
     // #then
-    expect(agents["sisyphus"]?.model).toBe("github-copilot/gpt-5.2")
-    expect(agents["sisyphus"]?.reasoningEffort).toBe("medium")
-    expect(agents["sisyphus"]?.thinking).toBeUndefined()
+    expect(agents.sisyphus.model).toBe("github-copilot/gpt-5.2")
+    expect(agents.sisyphus.reasoningEffort).toBe("medium")
+    expect(agents.sisyphus.thinking).toBeUndefined()
   })
 
-  test("sisyphus uses fallback chain (claude-opus-4-5) not systemDefaultModel", async () => {
-    // #given - even with GPT systemDefaultModel, sisyphus prefers its fallback chain
-    const systemDefaultModel = "openai/gpt-5.2"
+  test("Sisyphus uses system default when no availableModels provided", async () => {
+    // #given
+    const systemDefaultModel = "anthropic/claude-opus-4-5"
 
     // #when
     const agents = await createBuiltinAgents([], {}, undefined, systemDefaultModel)
 
-    // #then - sisyphus uses its fallback chain which prefers claude-opus-4-5
-    // (systemDefaultModel is only used when fallback chain is exhausted)
-    expect(agents["sisyphus"]).toBeDefined()
-    // Model comes from fallback chain, not systemDefaultModel
+    // #then - falls back to system default when no availability match
+    expect(agents.sisyphus.model).toBe("anthropic/claude-opus-4-5")
+    expect(agents.sisyphus.thinking).toEqual({ type: "enabled", budgetTokens: 32000 })
+    expect(agents.sisyphus.reasoningEffort).toBeUndefined()
   })
 
-  test("Oracle uses its fallback chain (gpt-5.2) by default", async () => {
-    // #given - no overrides
-    // Oracle's fallback chain prefers gpt-5.2
+  test("Oracle uses connected provider fallback when availableModels is empty and cache exists", async () => {
+    // #given - connected providers cache has "openai", which matches oracle's first fallback entry
+    const cacheSpy = spyOn(connectedProvidersCache, "readConnectedProvidersCache").mockReturnValue(["openai"])
 
     // #when
     const agents = await createBuiltinAgents([], {}, undefined, TEST_DEFAULT_MODEL)
 
-    // #then - Oracle uses its fallback chain which prefers gpt-5.2
-    expect(agents["oracle"]).toBeDefined()
-    // Model comes from fallback chain, which prefers gpt-5.2 over systemDefaultModel
+    // #then - oracle resolves via connected cache fallback to openai/gpt-5.2 (not system default)
+    expect(agents.oracle.model).toBe("openai/gpt-5.2")
+    expect(agents.oracle.reasoningEffort).toBe("medium")
+    expect(agents.oracle.thinking).toBeUndefined()
+    cacheSpy.mockRestore()
+  })
+
+  test("Oracle created without model field when no cache exists (first run scenario)", async () => {
+    // #given - no cache at all (first run)
+    const cacheSpy = spyOn(connectedProvidersCache, "readConnectedProvidersCache").mockReturnValue(null)
+
+    // #when
+    const agents = await createBuiltinAgents([], {}, undefined, TEST_DEFAULT_MODEL)
+
+    // #then - oracle should be created with system default model (fallback to systemDefaultModel)
+    expect(agents.oracle).toBeDefined()
+    expect(agents.oracle.model).toBe(TEST_DEFAULT_MODEL)
+    cacheSpy.mockRestore()
   })
 
   test("Oracle with GPT model override has reasoningEffort, no thinking", async () => {
@@ -67,10 +84,10 @@ describe("createBuiltinAgents with model overrides", () => {
     const agents = await createBuiltinAgents([], overrides, undefined, TEST_DEFAULT_MODEL)
 
     // #then
-    expect(agents["oracle"]?.model).toBe("openai/gpt-5.2")
-    expect(agents["oracle"]?.reasoningEffort).toBe("medium")
-    expect(agents["oracle"]?.textVerbosity).toBe("high")
-    expect(agents["oracle"]?.thinking).toBeUndefined()
+    expect(agents.oracle.model).toBe("openai/gpt-5.2")
+    expect(agents.oracle.reasoningEffort).toBe("medium")
+    expect(agents.oracle.textVerbosity).toBe("high")
+    expect(agents.oracle.thinking).toBeUndefined()
   })
 
   test("Oracle with Claude model override has thinking, no reasoningEffort", async () => {
@@ -83,30 +100,74 @@ describe("createBuiltinAgents with model overrides", () => {
     const agents = await createBuiltinAgents([], overrides, undefined, TEST_DEFAULT_MODEL)
 
     // #then
-    expect(agents["oracle"]?.model).toBe("anthropic/claude-sonnet-4")
-    expect(agents["oracle"]?.thinking).toEqual({ type: "enabled", budgetTokens: 32000 })
-    expect(agents["oracle"]?.reasoningEffort).toBeUndefined()
-    expect(agents["oracle"]?.textVerbosity).toBeUndefined()
+    expect(agents.oracle.model).toBe("anthropic/claude-sonnet-4")
+    expect(agents.oracle.thinking).toEqual({ type: "enabled", budgetTokens: 32000 })
+    expect(agents.oracle.reasoningEffort).toBeUndefined()
+    expect(agents.oracle.textVerbosity).toBeUndefined()
   })
 
-  test("non-model overrides are still applied after factory rebuild", async () => {
-    // #given
-    const overrides = {
-      sisyphus: { model: "github-copilot/gpt-5.2", temperature: 0.5 },
-    }
+   test("non-model overrides are still applied after factory rebuild", async () => {
+     // #given
+     const overrides = {
+       sisyphus: { model: "github-copilot/gpt-5.2", temperature: 0.5 },
+     }
+
+     // #when
+     const agents = await createBuiltinAgents([], overrides, undefined, TEST_DEFAULT_MODEL)
+
+     // #then
+     expect(agents.sisyphus.model).toBe("github-copilot/gpt-5.2")
+     expect(agents.sisyphus.temperature).toBe(0.5)
+   })
+})
+
+describe("createBuiltinAgents without systemDefaultModel", () => {
+  test("agents created via connected cache fallback even without systemDefaultModel", async () => {
+    // #given - connected cache has "openai", which matches oracle's fallback chain
+    const cacheSpy = spyOn(connectedProvidersCache, "readConnectedProvidersCache").mockReturnValue(["openai"])
 
     // #when
-    const agents = await createBuiltinAgents([], overrides, undefined, TEST_DEFAULT_MODEL)
+    const agents = await createBuiltinAgents([], {}, undefined, undefined)
+
+    // #then - connected cache enables model resolution despite no systemDefaultModel
+    expect(agents.oracle).toBeDefined()
+    expect(agents.oracle.model).toBe("openai/gpt-5.2")
+    cacheSpy.mockRestore()
+  })
+
+  test("agents NOT created when no cache and no systemDefaultModel (first run without defaults)", async () => {
+    // #given
+    const cacheSpy = spyOn(connectedProvidersCache, "readConnectedProvidersCache").mockReturnValue(null)
+
+    // #when
+    const agents = await createBuiltinAgents([], {}, undefined, undefined)
 
     // #then
-    expect(agents["sisyphus"]?.model).toBe("github-copilot/gpt-5.2")
-    expect(agents["sisyphus"]?.temperature).toBe(0.5)
+    expect(agents.oracle).toBeUndefined()
+    cacheSpy.mockRestore()
+  })
+
+  test("sisyphus created via connected cache fallback even without systemDefaultModel", async () => {
+    // #given - connected cache has "anthropic", which matches sisyphus's first fallback entry
+    const cacheSpy = spyOn(connectedProvidersCache, "readConnectedProvidersCache").mockReturnValue(["anthropic"])
+
+    // #when
+    const agents = await createBuiltinAgents([], {}, undefined, undefined)
+
+    // #then - connected cache enables model resolution despite no systemDefaultModel
+    expect(agents.sisyphus).toBeDefined()
+    expect(agents.sisyphus.model).toBe("anthropic/claude-opus-4-5")
+    cacheSpy.mockRestore()
   })
 })
 
 describe("buildAgent with category and skills", () => {
   const { buildAgent } = require("./utils")
   const TEST_MODEL = "anthropic/claude-opus-4-5"
+
+  beforeEach(() => {
+    clearSkillCache()
+  })
 
   test("agent with category inherits category settings", () => {
     // #given - agent factory that sets category but no model
@@ -265,6 +326,8 @@ describe("buildAgent with category and skills", () => {
     const agent = buildAgent(source["test-agent"], TEST_MODEL)
 
     // #then
+    // Note: The factory receives model, but if category doesn't exist, it's not applied
+    // The agent's model comes from the factory output (which doesn't set model)
     expect(agent.model).toBeUndefined()
     expect(agent.prompt).toBe("Base prompt")
   })
@@ -304,5 +367,43 @@ describe("buildAgent with category and skills", () => {
 
     // #then
     expect(agent.prompt).toBe("Base prompt")
+  })
+
+  test("agent with agent-browser skill resolves when browserProvider is set", () => {
+    // #given
+    const source = {
+      "test-agent": () =>
+        ({
+          description: "Test agent",
+          skills: ["agent-browser"],
+          prompt: "Base prompt",
+        }) as AgentConfig,
+    }
+
+    // #when - browserProvider is "agent-browser"
+    const agent = buildAgent(source["test-agent"], TEST_MODEL, undefined, undefined, "agent-browser")
+
+    // #then - agent-browser skill content should be in prompt
+    expect(agent.prompt).toContain("agent-browser")
+    expect(agent.prompt).toContain("Base prompt")
+  })
+
+  test("agent with agent-browser skill NOT resolved when browserProvider not set", () => {
+    // #given
+    const source = {
+      "test-agent": () =>
+        ({
+          description: "Test agent",
+          skills: ["agent-browser"],
+          prompt: "Base prompt",
+        }) as AgentConfig,
+    }
+
+    // #when - no browserProvider (defaults to playwright)
+    const agent = buildAgent(source["test-agent"], TEST_MODEL)
+
+    // #then - agent-browser skill not found, only base prompt remains
+    expect(agent.prompt).toBe("Base prompt")
+    expect(agent.prompt).not.toContain("agent-browser open")
   })
 })

@@ -133,16 +133,20 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
     ];
 
     const browserProvider = pluginConfig.browser_automation_engine?.provider ?? "playwright";
+    // config.model represents the currently active model in OpenCode (including UI selection)
+    // Pass it as uiSelectedModel so it takes highest priority in model resolution
+    const currentModel = config.model as string | undefined;
     const builtinAgents = await createBuiltinAgents(
       migratedDisabledAgents,
       pluginConfig.agents,
       ctx.directory,
-      config.model as string | undefined,
+      undefined, // systemDefaultModel - let fallback chain handle this
       pluginConfig.categories,
       pluginConfig.git_master,
       allDiscoveredSkills,
       ctx.client,
-      browserProvider
+      browserProvider,
+      currentModel // uiSelectedModel - takes highest priority
     );
 
     // Claude Code agents: Do NOT apply permission migration
@@ -225,7 +229,6 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
           pluginConfig.agents?.["prometheus"] as
             | (Record<string, unknown> & { category?: string; model?: string; variant?: string })
             | undefined;
-        const defaultModel = config.model as string | undefined;
 
         const categoryConfig = prometheusOverride?.category
           ? resolveCategoryConfig(
@@ -241,10 +244,11 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
           : new Set<string>();
 
         const modelResolution = resolveModelWithFallback({
+          uiSelectedModel: currentModel,
           userModel: prometheusOverride?.model ?? categoryConfig?.model,
           fallbackChain: prometheusRequirement?.fallbackChain,
           availableModels,
-          systemDefaultModel: defaultModel ?? "",
+          systemDefaultModel: undefined, // let fallback chain handle this
         });
         const resolvedModel = modelResolution?.model;
         const resolvedVariant = modelResolution?.variant;
@@ -254,7 +258,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
           name: "prometheus",
           ...(resolvedModel ? { model: resolvedModel } : {}),
           ...(variantToUse ? { variant: variantToUse } : {}),
-          mode: "primary" as const,
+          mode: "all" as const,
           prompt: PROMETHEUS_SYSTEM_PROMPT,
           permission: PROMETHEUS_PERMISSION,
           description: `${configAgent?.plan?.description ?? "Plan agent"} (Prometheus - OhMyOpenCode)`,
@@ -307,7 +311,11 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
         : {};
 
       const planDemoteConfig = replacePlan && agentConfig["prometheus"]
-        ? { ...agentConfig["prometheus"], name: "plan", mode: "subagent" as const }
+        ? { 
+            ...agentConfig["prometheus"],
+            name: "plan", 
+            mode: "subagent" as const 
+          }
         : undefined;
 
       config.agent = {
@@ -381,8 +389,8 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       : { servers: {} };
 
     config.mcp = {
-      ...(config.mcp as Record<string, unknown>),
       ...createBuiltinMcps(pluginConfig.disabled_mcps),
+      ...(config.mcp as Record<string, unknown>),
       ...mcpResult.servers,
       ...pluginComponents.mcpServers,
     };

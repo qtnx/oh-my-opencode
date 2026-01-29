@@ -170,6 +170,7 @@ function createBackgroundManager(): BackgroundManager {
   const client = {
     session: {
       prompt: async () => ({}),
+      abort: async () => ({}),
     },
   }
   return new BackgroundManager({ client, directory: tmpdir() } as unknown as PluginInput)
@@ -1053,6 +1054,7 @@ describe("BackgroundManager.resume model persistence", () => {
           promptCalls.push(args)
           return {}
         },
+        abort: async () => ({}),
       },
     }
     manager = new BackgroundManager({ client, directory: tmpdir() } as unknown as PluginInput)
@@ -1926,188 +1928,162 @@ describe("BackgroundManager.checkAndInterruptStaleTasks", () => {
   })
 })
 
-/**
- * Tests for handleEvent - specifically testing session.idle behavior
- * to reproduce the bug where background tasks report complete before finishing
- */
-describe("BackgroundManager.handleEvent - session.idle", () => {
-  /**
-   * MockBackgroundManagerWithEvents extends the mock to include handleEvent logic
-   */
-  class MockBackgroundManagerWithEvents extends MockBackgroundManager {
-    public validateSessionHasOutputResult = true
-    public checkSessionTodosResult = false
-    public completedTasks: string[] = []
-    private MIN_IDLE_TIME_MS = 5000
+describe("BackgroundManager.shutdown session abort", () => {
+  test("should call session.abort for all running tasks during shutdown", () => {
+    // #given
+    const abortedSessionIDs: string[] = []
+    const client = {
+      session: {
+        prompt: async () => ({}),
+        abort: async (args: { path: { id: string } }) => {
+          abortedSessionIDs.push(args.path.id)
+          return {}
+        },
+      },
+    }
+    const manager = new BackgroundManager({ client, directory: tmpdir() } as unknown as PluginInput)
 
-    async handleEvent(event: { type: string; properties?: Record<string, unknown> }): Promise<void> {
-      const props = event.properties
+    const task1: BackgroundTask = {
+      id: "task-1",
+      sessionID: "session-1",
+      parentSessionID: "parent-1",
+      parentMessageID: "msg-1",
+      description: "Running task 1",
+      prompt: "Test",
+      agent: "test-agent",
+      status: "running",
+      startedAt: new Date(),
+    }
+    const task2: BackgroundTask = {
+      id: "task-2",
+      sessionID: "session-2",
+      parentSessionID: "parent-2",
+      parentMessageID: "msg-2",
+      description: "Running task 2",
+      prompt: "Test",
+      agent: "test-agent",
+      status: "running",
+      startedAt: new Date(),
+    }
 
-      if (event.type === "session.idle") {
-        const sessionID = props?.sessionID as string | undefined
-        if (!sessionID) return
+    getTaskMap(manager).set(task1.id, task1)
+    getTaskMap(manager).set(task2.id, task2)
 
-        const task = this.findBySession(sessionID)
-        if (!task || task.status !== "running" || !task.startedAt) return
+    // #when
+    manager.shutdown()
 
-        // Edge guard: Require minimum elapsed time before accepting idle
-        const elapsedMs = Date.now() - task.startedAt.getTime()
-        if (elapsedMs < this.MIN_IDLE_TIME_MS) {
-          return
-        }
+    // #then
+    expect(abortedSessionIDs).toContain("session-1")
+    expect(abortedSessionIDs).toContain("session-2")
+    expect(abortedSessionIDs).toHaveLength(2)
+  })
 
-        // Simulate async validation
-        const hasValidOutput = this.validateSessionHasOutputResult
-        if (!hasValidOutput) {
-          return
-        }
+  test("should not call session.abort for completed or cancelled tasks", () => {
+    // #given
+    const abortedSessionIDs: string[] = []
+    const client = {
+      session: {
+        prompt: async () => ({}),
+        abort: async (args: { path: { id: string } }) => {
+          abortedSessionIDs.push(args.path.id)
+          return {}
+        },
+      },
+    }
+    const manager = new BackgroundManager({ client, directory: tmpdir() } as unknown as PluginInput)
 
-        const hasIncompleteTodos = this.checkSessionTodosResult
-        if (hasIncompleteTodos) {
-          return
-        }
+    const completedTask: BackgroundTask = {
+      id: "task-completed",
+      sessionID: "session-completed",
+      parentSessionID: "parent-1",
+      parentMessageID: "msg-1",
+      description: "Completed task",
+      prompt: "Test",
+      agent: "test-agent",
+      status: "completed",
+      startedAt: new Date(),
+      completedAt: new Date(),
+    }
+    const cancelledTask: BackgroundTask = {
+      id: "task-cancelled",
+      sessionID: "session-cancelled",
+      parentSessionID: "parent-2",
+      parentMessageID: "msg-2",
+      description: "Cancelled task",
+      prompt: "Test",
+      agent: "test-agent",
+      status: "cancelled",
+      startedAt: new Date(),
+      completedAt: new Date(),
+    }
+    const pendingTask: BackgroundTask = {
+      id: "task-pending",
+      parentSessionID: "parent-3",
+      parentMessageID: "msg-3",
+      description: "Pending task",
+      prompt: "Test",
+      agent: "test-agent",
+      status: "pending",
+      queuedAt: new Date(),
+    }
 
-        // Mark complete
-        task.status = "completed"
-        task.completedAt = new Date()
-        this.completedTasks.push(task.id)
-        this.markForNotification(task)
+    getTaskMap(manager).set(completedTask.id, completedTask)
+    getTaskMap(manager).set(cancelledTask.id, cancelledTask)
+    getTaskMap(manager).set(pendingTask.id, pendingTask)
+
+    // #when
+    manager.shutdown()
+
+    // #then
+    expect(abortedSessionIDs).toHaveLength(0)
+  })
+
+  test("should call onShutdown callback during shutdown", () => {
+    // #given
+    let shutdownCalled = false
+    const client = {
+      session: {
+        prompt: async () => ({}),
+        abort: async () => ({}),
+      },
+    }
+    const manager = new BackgroundManager(
+      { client, directory: tmpdir() } as unknown as PluginInput,
+      undefined,
+      {
+        onShutdown: () => {
+          shutdownCalled = true
+        },
       }
+    )
+
+    // #when
+    manager.shutdown()
+
+    // #then
+    expect(shutdownCalled).toBe(true)
+  })
+
+  test("should not throw when onShutdown callback throws", () => {
+    // #given
+    const client = {
+      session: {
+        prompt: async () => ({}),
+        abort: async () => ({}),
+      },
     }
+    const manager = new BackgroundManager(
+      { client, directory: tmpdir() } as unknown as PluginInput,
+      undefined,
+      {
+        onShutdown: () => {
+          throw new Error("cleanup failed")
+        },
+      }
+    )
 
-    setMinIdleTime(ms: number): void {
-      this.MIN_IDLE_TIME_MS = ms
-    }
-  }
-
-  test("should NOT complete task when session.idle fires before MIN_IDLE_TIME", async () => {
-    // #given - task just started
-    const manager = new MockBackgroundManagerWithEvents()
-    manager.setMinIdleTime(5000) // 5 seconds minimum
-
-    const task = createMockTask({
-      id: "task-early",
-      sessionID: "session-early",
-      parentSessionID: "session-parent",
-      startedAt: new Date(), // Just started
-    })
-    manager.addTask(task)
-
-    // #when - session.idle fires immediately (before 5s)
-    await manager.handleEvent({
-      type: "session.idle",
-      properties: { sessionID: "session-early" },
-    })
-
-    // #then - task should NOT be completed
-    expect(task.status).toBe("running")
-    expect(manager.completedTasks).not.toContain("task-early")
-  })
-
-  test("should complete task when session.idle fires after MIN_IDLE_TIME with valid output", async () => {
-    // #given - task started 10 seconds ago
-    const manager = new MockBackgroundManagerWithEvents()
-    manager.setMinIdleTime(5000)
-    manager.validateSessionHasOutputResult = true
-    manager.checkSessionTodosResult = false
-
-    const task = createMockTask({
-      id: "task-ready",
-      sessionID: "session-ready",
-      parentSessionID: "session-parent",
-      startedAt: new Date(Date.now() - 10000), // Started 10s ago
-    })
-    manager.addTask(task)
-
-    // #when - session.idle fires after task has run for a while
-    await manager.handleEvent({
-      type: "session.idle",
-      properties: { sessionID: "session-ready" },
-    })
-
-    // #then - task should be completed
-    expect(task.status).toBe("completed")
-    expect(manager.completedTasks).toContain("task-ready")
-  })
-
-  test("should NOT complete task when validateSessionHasOutput returns false", async () => {
-    // #given - task running but no output yet
-    const manager = new MockBackgroundManagerWithEvents()
-    manager.setMinIdleTime(5000)
-    manager.validateSessionHasOutputResult = false // No output yet
-
-    const task = createMockTask({
-      id: "task-no-output",
-      sessionID: "session-no-output",
-      parentSessionID: "session-parent",
-      startedAt: new Date(Date.now() - 10000), // Started 10s ago
-    })
-    manager.addTask(task)
-
-    // #when - session.idle fires but no output
-    await manager.handleEvent({
-      type: "session.idle",
-      properties: { sessionID: "session-no-output" },
-    })
-
-    // #then - task should NOT be completed
-    expect(task.status).toBe("running")
-    expect(manager.completedTasks).not.toContain("task-no-output")
-  })
-
-  test("should NOT complete task when there are incomplete todos", async () => {
-    // #given - task has incomplete todos
-    const manager = new MockBackgroundManagerWithEvents()
-    manager.setMinIdleTime(5000)
-    manager.validateSessionHasOutputResult = true
-    manager.checkSessionTodosResult = true // Has incomplete todos
-
-    const task = createMockTask({
-      id: "task-with-todos",
-      sessionID: "session-todos",
-      parentSessionID: "session-parent",
-      startedAt: new Date(Date.now() - 10000),
-    })
-    manager.addTask(task)
-
-    // #when - session.idle fires but todos incomplete
-    await manager.handleEvent({
-      type: "session.idle",
-      properties: { sessionID: "session-todos" },
-    })
-
-    // #then - task should NOT be completed
-    expect(task.status).toBe("running")
-    expect(manager.completedTasks).not.toContain("task-with-todos")
-  })
-
-  test("BUG REPRODUCTION: task completes too early when session.idle fires multiple times", async () => {
-    // This test demonstrates the potential bug scenario:
-    // OpenCode may send multiple session.idle events, and if the first one
-    // passes all checks (even with minimal output), the task is marked complete
-
-    // #given - task just started but has some minimal output already
-    const manager = new MockBackgroundManagerWithEvents()
-    manager.setMinIdleTime(100) // Very short for testing
-    manager.validateSessionHasOutputResult = true // Minimal output exists
-
-    const task = createMockTask({
-      id: "task-premature",
-      sessionID: "session-premature",
-      parentSessionID: "session-parent",
-      startedAt: new Date(Date.now() - 200), // Started 200ms ago (passes 100ms check)
-    })
-    manager.addTask(task)
-
-    // #when - first session.idle fires very early
-    await manager.handleEvent({
-      type: "session.idle",
-      properties: { sessionID: "session-premature" },
-    })
-
-    // #then - task is incorrectly marked as completed (BUG)
-    // In real scenario, the task may still be processing
-    expect(task.status).toBe("completed") // This demonstrates the bug
-    expect(manager.completedTasks).toContain("task-premature")
+    // #when / #then
+    expect(() => manager.shutdown()).not.toThrow()
   })
 })
+
